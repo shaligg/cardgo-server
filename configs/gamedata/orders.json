@@ -1,0 +1,211 @@
+{
+  "orders": [
+    {
+      "order_id": 20001,
+      "key": "white_bread",
+      "name": "白面包",
+      "order_type": "normal",
+      "requirements": [
+        {
+          "resource": "bread",
+          "count": 2
+        }
+      ],
+      "rewards": [
+        {
+          "item_id": 1,
+          "count": 8
+        }
+      ],
+      "tags": ["bread"]
+    },
+    {
+      "order_id": 20002,
+      "key": "fish_bread",
+      "name": "鱼形面包",
+      "order_type": "normal",
+      "requirements": [
+        {
+          "resource": "bread",
+          "count": 3
+        }
+      ],
+      "rewards": [
+        {
+          "item_id": 1,
+          "count": 12
+        }
+      ],
+      "tags": ["bread"]
+    },
+    {
+      "order_id": 20003,
+      "key": "cream_toast",
+      "name": "奶油吐司",
+      "order_type": "normal",
+      "requirements": [
+        {
+          "resource": "bread",
+          "count": 4
+        }
+      ],
+      "rewards": [
+        {
+          "item_id": 1,
+          "count": 16
+        }
+      ],
+      "tags": ["bread"]
+    },
+    {
+      "order_id": 20004,
+      "key": "rush_toast",
+      "name": "加急吐司",
+      "order_type": "rush",
+      "turn_limit": 2,
+      "requirements": [
+        {
+          "resource": "bread",
+          "count": 3
+        }
+      ],
+      "rewards": [
+        {
+          "item_id": 1,
+          "count": 18
+        }
+      ],
+      "tags": ["bread", "rush"]
+    },
+    {
+      "order_id": 20005,
+      "key": "bread_gift_box",
+      "name": "面包礼盒",
+      "order_type": "high_value",
+      "requirements": [
+        {
+          "resource": "bread",
+          "count": 7
+        }
+      ],
+      "rewards": [
+        {
+          "item_id": 1,
+          "count": 34
+        },
+        {
+          "item_id": 10001,
+          "count": 1
+        }
+      ],
+      "tags": ["bread", "high_value"]
+    },
+    {
+      "order_id": 20101,
+      "key": "small_stool",
+      "name": "小木凳",
+      "order_type": "normal",
+      "requirements": [
+        {
+          "resource": "wood",
+          "count": 2
+        }
+      ],
+      "rewards": [
+        {
+          "item_id": 1,
+          "count": 10
+        }
+      ],
+      "tags": ["wood"]
+    },
+    {
+      "order_id": 20102,
+      "key": "cat_scratch_board",
+      "name": "猫抓板",
+      "order_type": "normal",
+      "requirements": [
+        {
+          "resource": "wood",
+          "count": 3
+        }
+      ],
+      "rewards": [
+        {
+          "item_id": 1,
+          "count": 15
+        }
+      ],
+      "tags": ["wood"]
+    },
+    {
+      "order_id": 20201,
+      "key": "small_scarf",
+      "name": "小围巾",
+      "order_type": "normal",
+      "requirements": [
+        {
+          "resource": "cloth",
+          "count": 2
+        }
+      ],
+      "rewards": [
+        {
+          "item_id": 1,
+          "count": 9
+        }
+      ],
+      "tags": ["cloth"]
+    },
+    {
+      "order_id": 20301,
+      "key": "picnic_basket",
+      "name": "野餐篮",
+      "order_type": "composite",
+      "requirements": [
+        {
+          "resource": "bread",
+          "count": 3
+        },
+        {
+          "resource": "cloth",
+          "count": 2
+        }
+      ],
+      "rewards": [
+        {
+          "item_id": 1,
+          "count": 24
+        }
+      ],
+      "tags": ["bread", "cloth", "composite"]
+    },
+    {
+      "order_id": 20302,
+      "key": "wood_box_snack",
+      "name": "木盒点心",
+      "order_type": "composite",
+      "requirements": [
+        {
+          "resource": "bread",
+          "count": 3
+        },
+        {
+          "resource": "wood",
+          "count": 2
+        }
+      ],
+      "rewards": [
+        {
+          "item_id": 1,
+          "count": 25
+        },
+        {
+          "item_id": 10001,
+          "count": 1
+        }
+      ],
+      "tags": ["bread", "wood", "composite"]
+    }
+  ]
+}

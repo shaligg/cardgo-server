@@ -1,0 +1,18 @@
+# Docs Index
+
+本文档目录按用途拆分：
+
+- `design/`：策划、产品范围、系统设计与数值设计文档。
+- `ops/`：运行手册、压测模板和测试执行文档。
+
+后端架构入口仍保留在项目根目录：
+
+- `architecture_v2.md`：项目级后端架构总览。
+- `backend_technical_architecture.md`：后端技术架构细节。
+- `architecture_v2_task_breakdown.md`：架构落地与开发任务拆分。
+
+维护规则：
+
+- 策划玩法和产品范围写入 `docs/design/`。
+- 运维、压测、发布、回滚说明写入 `docs/ops/`。
+- 协议、接口、目录、数据表、迁移白名单等后端技术细节只维护在 `backend_technical_architecture.md`。

@@ -1,0 +1,29 @@
+# 数据库配置
+db:
+  path: "test.db"
+  debug_mode: true
+  max_open_conns: 50
+  max_idle_conns: 20
+  conn_max_lifetime: 1h
+  conn_max_idle_time: 30m
+
+# 缓存配置
+cache:
+  cache_ttl: 5m
+  cleanup_interval: 2m
+  idle_threshold: 10m
+  lock_shard_count: 32
+  debug_mode: true
+
+# Redis配置
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+  pool_size: 10
+  min_idle: 5
+  timeout: 5s
+
+# 服务器配置
+server:
+  port: 8080

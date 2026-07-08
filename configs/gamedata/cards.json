@@ -1,0 +1,1328 @@
+{
+  "cards": [
+    {
+      "card_id": 10001,
+      "key": "wheat_bag",
+      "name": "小麦袋",
+      "rarity": "N",
+      "card_type": "material",
+      "cost": 1,
+      "effects": [
+        {
+          "effect_type": "gain_resource",
+          "resource": "bread",
+          "value": 2
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10002,
+      "key": "bread_cat",
+      "name": "面包猫",
+      "rarity": "N",
+      "card_type": "artisan",
+      "cost": 1,
+      "effects": [
+        {
+          "effect_type": "periodic_gain",
+          "trigger": "turn_start",
+          "resource": "bread",
+          "value": 1
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10003,
+      "key": "small_oven",
+      "name": "小烤炉",
+      "rarity": "N",
+      "card_type": "tool",
+      "cost": 2,
+      "effects": [
+        {
+          "effect_type": "resource_bonus",
+          "trigger": "on_resource_gain",
+          "resource": "bread",
+          "value": 1,
+          "limit_per_turn": 2
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10004,
+      "key": "butter_slice",
+      "name": "黄油片",
+      "rarity": "N",
+      "card_type": "material",
+      "cost": 1,
+      "effects": [
+        {
+          "effect_type": "gain_resource",
+          "resource": "bread",
+          "value": 3
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10005,
+      "key": "sweet_jam",
+      "name": "甜果酱",
+      "rarity": "N",
+      "card_type": "tool",
+      "cost": 2,
+      "effects": [
+        {
+          "effect_type": "resource_bonus",
+          "trigger": "on_order_complete",
+          "resource": "bread",
+          "value": 2,
+          "limit_per_turn": 1
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10006,
+      "key": "wood_log",
+      "name": "小木料",
+      "rarity": "N",
+      "card_type": "material",
+      "cost": 1,
+      "effects": [
+        {
+          "effect_type": "gain_resource",
+          "resource": "wood",
+          "value": 2
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10007,
+      "key": "carpenter_cat",
+      "name": "木匠猫",
+      "rarity": "N",
+      "card_type": "artisan",
+      "cost": 2,
+      "effects": [
+        {
+          "effect_type": "periodic_gain",
+          "trigger": "turn_start",
+          "resource": "wood",
+          "value": 1
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10008,
+      "key": "tiny_saw",
+      "name": "小锯子",
+      "rarity": "N",
+      "card_type": "tool",
+      "cost": 2,
+      "effects": [
+        {
+          "effect_type": "resource_bonus",
+          "trigger": "on_resource_gain",
+          "resource": "wood",
+          "value": 1,
+          "limit_per_turn": 2
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10009,
+      "key": "cloth_roll",
+      "name": "布料卷",
+      "rarity": "N",
+      "card_type": "material",
+      "cost": 1,
+      "effects": [
+        {
+          "effect_type": "gain_resource",
+          "resource": "cloth",
+          "value": 2
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10010,
+      "key": "tailor_cat",
+      "name": "裁缝猫",
+      "rarity": "N",
+      "card_type": "artisan",
+      "cost": 2,
+      "effects": [
+        {
+          "effect_type": "periodic_gain",
+          "trigger": "turn_start",
+          "resource": "cloth",
+          "value": 1
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10011,
+      "key": "needle_box",
+      "name": "针线盒",
+      "rarity": "N",
+      "card_type": "tool",
+      "cost": 2,
+      "effects": [
+        {
+          "effect_type": "resource_bonus",
+          "trigger": "on_resource_gain",
+          "resource": "cloth",
+          "value": 1,
+          "limit_per_turn": 2
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10012,
+      "key": "delivery_cart",
+      "name": "送货小车",
+      "rarity": "N",
+      "card_type": "order_helper",
+      "cost": 1,
+      "effects": [
+        {
+          "effect_type": "order_reward_bonus",
+          "trigger": "on_order_complete",
+          "resource": "gold",
+          "value": 2,
+          "limit_per_turn": 2
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10013,
+      "key": "order_board",
+      "name": "订单板",
+      "rarity": "N",
+      "card_type": "order_helper",
+      "cost": 1,
+      "effects": [
+        {
+          "effect_type": "refresh_order",
+          "trigger": "on_play",
+          "resource": "order",
+          "value": 1
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10014,
+      "key": "lucky_bell",
+      "name": "招财铃",
+      "rarity": "R",
+      "card_type": "tool",
+      "cost": 2,
+      "effects": [
+        {
+          "effect_type": "order_reward_bonus",
+          "trigger": "on_order_complete",
+          "resource": "gold",
+          "value": 4,
+          "limit_per_turn": 1
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10015,
+      "key": "mixing_bowl",
+      "name": "混合碗",
+      "rarity": "N",
+      "card_type": "tool",
+      "cost": 1,
+      "effects": [
+        {
+          "effect_type": "convert_resource",
+          "resource": "bread",
+          "value": 1,
+          "to_resource": "cloth",
+          "to_value": 1
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10016,
+      "key": "wooden_box",
+      "name": "木盒模具",
+      "rarity": "N",
+      "card_type": "tool",
+      "cost": 1,
+      "effects": [
+        {
+          "effect_type": "convert_resource",
+          "resource": "wood",
+          "value": 1,
+          "to_resource": "bread",
+          "to_value": 1
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10017,
+      "key": "cat_helper",
+      "name": "猫咪助手",
+      "rarity": "R",
+      "card_type": "artisan",
+      "cost": 2,
+      "effects": [
+        {
+          "effect_type": "draw_card",
+          "trigger": "on_play",
+          "resource": "card",
+          "value": 1
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10018,
+      "key": "quick_hands",
+      "name": "快手猫爪",
+      "rarity": "R",
+      "card_type": "order_helper",
+      "cost": 0,
+      "effects": [
+        {
+          "effect_type": "cost_reduce",
+          "trigger": "on_play",
+          "resource": "action_point",
+          "value": 1,
+          "limit_per_turn": 1
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10019,
+      "key": "spark_powder",
+      "name": "闪光粉",
+      "rarity": "R",
+      "card_type": "material",
+      "cost": 2,
+      "effects": [
+        {
+          "effect_type": "gain_resource",
+          "resource": "magic",
+          "value": 1
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "card_id": 10020,
+      "key": "copy_cat",
+      "name": "复制猫",
+      "rarity": "R",
+      "card_type": "artisan",
+      "cost": 3,
+      "effects": [
+        {
+          "effect_type": "copy_resource",
+          "trigger": "on_play",
+          "resource": "last_gained_resource",
+          "value": 1
+        }
+      ],
+      "upgrade_costs": [
+        {
+          "target_level": 2,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 50
+            }
+          ]
+        },
+        {
+          "target_level": 3,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 100
+            },
+            {
+              "item_id": 10001,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "target_level": 4,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 150
+            },
+            {
+              "item_id": 10001,
+              "count": 4
+            }
+          ]
+        },
+        {
+          "target_level": 5,
+          "costs": [
+            {
+              "item_id": 1,
+              "count": 200
+            },
+            {
+              "item_id": 10001,
+              "count": 8
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

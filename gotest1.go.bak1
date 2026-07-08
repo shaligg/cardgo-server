@@ -1,0 +1,179 @@
+package main
+
+import (
+  "fmt"
+  "log"
+  "sync"
+  "time"
+
+  "gorm.io/driver/sqlite"
+  "gorm.io/gorm"
+)
+
+// 全局缓存相关变量
+var (
+  playerCache     = make(map[uint]*Player)                    // 玩家对象缓存
+  tableDataCaches = make(map[uint]map[string]*tableDataCache) // 按玩家ID分组的表数据缓存
+  lastAccessTime  = make(map[uint]time.Time)                  // 玩家最后访问时间记录
+  cacheMutex      sync.RWMutex                                // 缓存读写锁
+  globalDB        *gorm.DB                                    // 全局数据库连接
+)
+
+// tableDataCache 结构体定义表数据缓存项
+type tableDataCache struct {
+  data       interface{} // 存储的实际数据
+  expireTime time.Time   // 缓存过期时间
+}
+
+// Player 结构体定义玩家对象
+type Player struct {
+  ID   uint
+  Name string
+  DB   *gorm.DB // 每个玩家独立的数据库连接（可选）
+}
+
+// GetData 实现表数据缓存的获取逻辑
+func (t *tableDataCache) GetData(db *gorm.DB, playerID uint, tableName string) (interface{}, error) {
+  if time.Now().Before(t.expireTime) {
+    return t.data, nil // 缓存未过期，直接返回
+  }
+
+  // 缓存已过期，重新加载数据
+  var newData interface{}
+  // 使用GORM的Raw方法进行原始SQL查询（根据实际需要调整）
+  if err := db.Raw(fmt.Sprintf("SELECT * FROM %s WHERE player_id = ?", tableName), playerID).Scan(&newData).Error; err != nil {
+    return nil, fmt.Errorf("failed to reload table data for player %d, table %s: %v", playerID, tableName, err)
+  }
+
+  // 更新缓存数据和过期时间
+  t.data = newData
+  t.expireTime = time.Now().Add(5 * time.Minute) // 设置5分钟缓存有效期
+  return t.data, nil
+}
+
+// initDB 初始化全局数据库连接
+func initDB() {
+  var err error
+  globalDB, err = gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
+  if err != nil {
+    log.Fatalf("Failed to connect to database: %v", err)
+  }
+
+  // 配置数据库连接池（可选）
+  sqlDB, err := globalDB.DB()
+  if err != nil {
+    log.Fatalf("Failed to get raw DB connection: %v", err)
+  }
+  sqlDB.SetMaxOpenConns(10)           // 最大打开连接数
+  sqlDB.SetMaxIdleConns(5)            // 最大空闲连接数
+  sqlDB.SetConnMaxLifetime(time.Hour) // 连接最大存活时间
+}
+
+// startCacheCleaner 启动定时缓存清理任务
+func startCacheCleaner(interval time.Duration, idleThreshold time.Duration) {
+  ticker := time.NewTicker(interval)
+  go func() {
+    for range ticker.C {
+      cacheMutex.Lock()
+      now := time.Now()
+
+      // 清理长时间未访问的玩家缓存
+      for playerID, lastTime := range lastAccessTime {
+        if now.Sub(lastTime) > idleThreshold {
+          delete(playerCache, playerID)
+          delete(lastAccessTime, playerID)
+          delete(tableDataCaches, playerID) // 同时清理该玩家的所有表缓存
+          log.Printf("Cleared all caches for player %d (idle > %v)", playerID, idleThreshold)
+        }
+      }
+
+      // 清理孤立的表缓存（没有对应玩家缓存的情况）
+      for playerID := range tableDataCaches {
+        if _, exists := playerCache[playerID]; !exists {
+          delete(tableDataCaches, playerID)
+        }
+      }
+
+      cacheMutex.Unlock()
+    }
+  }()
+}
+
+// GetTableDataByID 获取指定玩家和表的数据（带缓存）
+func GetTableDataByID(playerID uint, tableName string) (interface{}, error) {
+  cacheMutex.RLock()
+  defer cacheMutex.RUnlock()
+
+  // 更新最后访问时间
+  lastAccessTime[playerID] = time.Now()
+
+  // 获取或创建玩家缓存
+  player, exists := playerCache[playerID]
+  if !exists {
+    var p Player
+    result := globalDB.Where("id = ?", playerID).First(&p)
+    if result.Error != nil {
+      return nil, fmt.Errorf("player %d not found: %v", playerID, result.Error)
+    }
+    player = &p
+    player.DB = globalDB // 可以为每个玩家分配独立DB连接（可选）
+    playerCache[playerID] = player
+  }
+
+  // 获取或创建表缓存
+  tableCaches, exists := tableDataCaches[playerID]
+  if !exists {
+    tableCaches = make(map[string]*tableDataCache)
+    tableDataCaches[playerID] = tableCaches
+  }
+
+  tableCache, exists := tableCaches[tableName]
+  if !exists {
+    // 初始化新缓存项
+    tableCache = &tableDataCache{
+      expireTime: time.Now().Add(5 * time.Minute), // 初始过期时间
+    }
+    tableCaches[tableName] = tableCache
+  }
+
+  // 从缓存获取数据（自动处理过期）
+  return tableCache.GetData(globalDB, playerID, tableName)
+}
+
+// main 函数（示例用法）
+func main() {
+  // 初始化数据库
+  initDB()
+
+  // 创建测试表（如果不存在）
+  globalDB.AutoMigrate(&Player{})
+
+  // 启动定时缓存清理（每30分钟检查一次，清理超过1小时未访问的缓存）
+  startCacheCleaner(30*time.Minute, 1*time.Hour)
+
+  // 示例：获取玩家123的inventory表数据
+  playerID := uint(123)
+  tableName := "inventory"
+
+  // 第一次获取（会查询数据库）
+  data, err := GetTableDataByID(playerID, tableName)
+  if err != nil {
+    log.Fatalf("First fetch failed: %v", err)
+  }
+  fmt.Printf("First fetch (from DB): %+v\n", data)
+
+  // 第二次获取（使用缓存）
+  cachedData, err := GetTableDataByID(playerID, tableName)
+  if err != nil {
+    log.Fatalf("Second fetch failed: %v", err)
+  }
+  fmt.Printf("Second fetch (from cache): %+v\n", cachedData)
+
+  // 等待超过缓存时间后再次获取（会重新查询数据库）
+  time.Sleep(6 * time.Minute)
+  expiredData, err := GetTableDataByID(playerID, tableName)
+  if err != nil {
+    log.Fatalf("Expired fetch failed: %v", err)
+  }
+  fmt.Printf("Expired fetch (from DB): %+v\n", expiredData)
+}

@@ -1,0 +1,11 @@
+/pkg/mod/
+/pkg/sumdb/
+
+# Local IDE settings.
+.idea/
+.vscode/
+settings.json
+
+# Local databases and build outputs.
+*.db
+go_orm_server

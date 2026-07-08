@@ -1,0 +1,25 @@
+{
+  "items": [
+    {
+      "item_id": 1,
+      "key": "gold",
+      "name": "金币",
+      "item_type": "currency",
+      "storage_type": "player_field",
+      "storage_key": "gold",
+      "system": "base",
+      "stackable": true,
+      "visible_in_bag": false
+    },
+    {
+      "item_id": 10001,
+      "key": "basic_material",
+      "name": "基础材料",
+      "item_type": "material",
+      "storage_type": "inventory_stack",
+      "system": "common",
+      "stackable": true,
+      "visible_in_bag": true
+    }
+  ]
+}

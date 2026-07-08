@@ -1,0 +1,32 @@
+server:
+  node_id: "node-prod"
+  api_host: "0.0.0.0"
+  api_port: 8080
+  ws_host: "0.0.0.0"
+  ws_port: 8081
+  max_connections: 2000
+  drain_mode: false
+  dispatcher_shards: 64
+  flush_queue_max: 10000
+  flush_max_retry: 3
+
+ws:
+  heartbeat_interval_sec: 30
+  pong_wait_sec: 60
+  write_wait_sec: 10
+  send_queue_size: 256
+  biz_min_gap_ms: 5
+  max_message_bytes: 65536
+
+db:
+  dsn: "file:game_prod.db?cache=shared&_busy_timeout=5000"
+
+debug:
+  enable_ws_debug_ops: false
+
+gamedata:
+  item_config_path: "configs/gamedata/items.json"
+  card_config_path: "configs/gamedata/cards.json"
+  order_config_path: "configs/gamedata/orders.json"
+  level_config_path: "configs/gamedata/levels.json"
+  facility_config_path: "configs/gamedata/facilities.json"

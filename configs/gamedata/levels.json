@@ -1,0 +1,416 @@
+{
+  "levels": [
+    {
+      "level_id": 1,
+      "name": "第一份订单",
+      "chapter": 1,
+      "turn_limit": 3,
+      "action_point_per_turn": 3,
+      "order_slots": 1,
+      "initial_orders": 1,
+      "goal": {
+        "goal_type": "complete_orders",
+        "target": 1
+      },
+      "fixed_cards": [10001],
+      "order_pool": [
+        {
+          "order_id": 20001,
+          "weight": 100
+        }
+      ],
+      "first_clear_rewards": [
+        {
+          "item_id": 1,
+          "count": 20
+        },
+        {
+          "item_id": 10001,
+          "count": 2
+        }
+      ],
+      "repeat_rewards": [
+        {
+          "item_id": 1,
+          "count": 8
+        }
+      ]
+    },
+    {
+      "level_id": 2,
+      "name": "面包猫上工",
+      "chapter": 1,
+      "turn_limit": 4,
+      "action_point_per_turn": 3,
+      "order_slots": 2,
+      "initial_orders": 2,
+      "goal": {
+        "goal_type": "complete_orders",
+        "target": 2
+      },
+      "fixed_cards": [10002, 10001],
+      "order_pool": [
+        {
+          "order_id": 20001,
+          "weight": 60
+        },
+        {
+          "order_id": 20002,
+          "weight": 40
+        }
+      ],
+      "first_clear_rewards": [
+        {
+          "item_id": 1,
+          "count": 25
+        }
+      ],
+      "repeat_rewards": [
+        {
+          "item_id": 1,
+          "count": 10
+        }
+      ]
+    },
+    {
+      "level_id": 3,
+      "name": "烤炉开火",
+      "chapter": 1,
+      "turn_limit": 5,
+      "action_point_per_turn": 3,
+      "order_slots": 2,
+      "initial_orders": 2,
+      "goal": {
+        "goal_type": "complete_orders",
+        "target": 2
+      },
+      "fixed_cards": [10003, 10001],
+      "order_pool": [
+        {
+          "order_id": 20001,
+          "weight": 50
+        },
+        {
+          "order_id": 20005,
+          "weight": 50
+        }
+      ],
+      "first_clear_rewards": [
+        {
+          "item_id": 1,
+          "count": 30
+        },
+        {
+          "item_id": 10001,
+          "count": 2
+        }
+      ],
+      "repeat_rewards": [
+        {
+          "item_id": 1,
+          "count": 12
+        }
+      ]
+    },
+    {
+      "level_id": 4,
+      "name": "奶油吐司",
+      "chapter": 1,
+      "turn_limit": 5,
+      "action_point_per_turn": 3,
+      "order_slots": 2,
+      "initial_orders": 2,
+      "goal": {
+        "goal_type": "complete_orders",
+        "target": 2
+      },
+      "fixed_cards": [10004, 10005, 10001],
+      "order_pool": [
+        {
+          "order_id": 20002,
+          "weight": 45
+        },
+        {
+          "order_id": 20003,
+          "weight": 55
+        }
+      ],
+      "first_clear_rewards": [
+        {
+          "item_id": 1,
+          "count": 35
+        }
+      ],
+      "repeat_rewards": [
+        {
+          "item_id": 1,
+          "count": 14
+        }
+      ]
+    },
+    {
+      "level_id": 5,
+      "name": "新菜单",
+      "chapter": 1,
+      "turn_limit": 6,
+      "action_point_per_turn": 3,
+      "order_slots": 3,
+      "initial_orders": 3,
+      "goal": {
+        "goal_type": "complete_orders",
+        "target": 3
+      },
+      "fixed_cards": [10001, 10002, 10003, 10004, 10005],
+      "order_pool": [
+        {
+          "order_id": 20001,
+          "weight": 25
+        },
+        {
+          "order_id": 20002,
+          "weight": 25
+        },
+        {
+          "order_id": 20003,
+          "weight": 25
+        },
+        {
+          "order_id": 20005,
+          "weight": 25
+        }
+      ],
+      "first_clear_rewards": [
+        {
+          "item_id": 1,
+          "count": 40
+        },
+        {
+          "item_id": 10001,
+          "count": 2
+        }
+      ],
+      "repeat_rewards": [
+        {
+          "item_id": 1,
+          "count": 16
+        }
+      ]
+    },
+    {
+      "level_id": 6,
+      "name": "小木凳订单",
+      "chapter": 1,
+      "turn_limit": 6,
+      "action_point_per_turn": 3,
+      "order_slots": 3,
+      "initial_orders": 3,
+      "goal": {
+        "goal_type": "complete_orders",
+        "target": 3
+      },
+      "fixed_cards": [10006, 10007, 10001],
+      "order_pool": [
+        {
+          "order_id": 20001,
+          "weight": 35
+        },
+        {
+          "order_id": 20101,
+          "weight": 65
+        }
+      ],
+      "first_clear_rewards": [
+        {
+          "item_id": 1,
+          "count": 45
+        }
+      ],
+      "repeat_rewards": [
+        {
+          "item_id": 1,
+          "count": 18
+        }
+      ]
+    },
+    {
+      "level_id": 7,
+      "name": "木盒点心",
+      "chapter": 1,
+      "turn_limit": 6,
+      "action_point_per_turn": 3,
+      "order_slots": 3,
+      "initial_orders": 3,
+      "goal": {
+        "goal_type": "complete_orders",
+        "target": 3
+      },
+      "fixed_cards": [10006, 10008, 10016, 10001],
+      "order_pool": [
+        {
+          "order_id": 20002,
+          "weight": 30
+        },
+        {
+          "order_id": 20101,
+          "weight": 30
+        },
+        {
+          "order_id": 20302,
+          "weight": 40
+        }
+      ],
+      "first_clear_rewards": [
+        {
+          "item_id": 1,
+          "count": 50
+        },
+        {
+          "item_id": 10001,
+          "count": 2
+        }
+      ],
+      "repeat_rewards": [
+        {
+          "item_id": 1,
+          "count": 20
+        }
+      ]
+    },
+    {
+      "level_id": 8,
+      "name": "忙碌早晨",
+      "chapter": 1,
+      "turn_limit": 6,
+      "action_point_per_turn": 3,
+      "order_slots": 3,
+      "initial_orders": 3,
+      "goal": {
+        "goal_type": "complete_orders",
+        "target": 4
+      },
+      "fixed_cards": [10001, 10002, 10012, 10013, 10017],
+      "order_pool": [
+        {
+          "order_id": 20001,
+          "weight": 25
+        },
+        {
+          "order_id": 20002,
+          "weight": 25
+        },
+        {
+          "order_id": 20004,
+          "weight": 20
+        },
+        {
+          "order_id": 20005,
+          "weight": 30
+        }
+      ],
+      "first_clear_rewards": [
+        {
+          "item_id": 1,
+          "count": 55
+        }
+      ],
+      "repeat_rewards": [
+        {
+          "item_id": 1,
+          "count": 22
+        }
+      ]
+    },
+    {
+      "level_id": 9,
+      "name": "加急吐司",
+      "chapter": 1,
+      "turn_limit": 6,
+      "action_point_per_turn": 3,
+      "order_slots": 3,
+      "initial_orders": 3,
+      "goal": {
+        "goal_type": "complete_orders",
+        "target": 4
+      },
+      "fixed_cards": [10001, 10004, 10012, 10018],
+      "order_pool": [
+        {
+          "order_id": 20002,
+          "weight": 30
+        },
+        {
+          "order_id": 20003,
+          "weight": 30
+        },
+        {
+          "order_id": 20004,
+          "weight": 40
+        }
+      ],
+      "first_clear_rewards": [
+        {
+          "item_id": 1,
+          "count": 60
+        },
+        {
+          "item_id": 10001,
+          "count": 2
+        }
+      ],
+      "repeat_rewards": [
+        {
+          "item_id": 1,
+          "count": 24
+        }
+      ]
+    },
+    {
+      "level_id": 10,
+      "name": "每日委托预演",
+      "chapter": 1,
+      "turn_limit": 6,
+      "action_point_per_turn": 3,
+      "order_slots": 3,
+      "initial_orders": 3,
+      "goal": {
+        "goal_type": "complete_orders",
+        "target": 4
+      },
+      "fixed_cards": [10001, 10006, 10009, 10012, 10014, 10015],
+      "order_pool": [
+        {
+          "order_id": 20003,
+          "weight": 20
+        },
+        {
+          "order_id": 20102,
+          "weight": 25
+        },
+        {
+          "order_id": 20201,
+          "weight": 25
+        },
+        {
+          "order_id": 20301,
+          "weight": 30
+        }
+      ],
+      "first_clear_rewards": [
+        {
+          "item_id": 1,
+          "count": 70
+        },
+        {
+          "item_id": 10001,
+          "count": 3
+        }
+      ],
+      "repeat_rewards": [
+        {
+          "item_id": 1,
+          "count": 28
+        }
+      ]
+    }
+  ]
+}

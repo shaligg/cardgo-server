@@ -1,0 +1,579 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"reflect"
+	"sync"
+	"time"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+)
+
+// DataModel 定义数据模型接口（用于接口方式实现，反射方式不依赖此接口）
+type DataModel interface {
+	TableName() string
+	FetchByPlayerID(db *gorm.DB, playerID uint) (interface{}, error)
+}
+
+// 全局缓存相关变量
+var (
+	playerCache     = make(map[uint]*Player)                    // 玩家对象缓存
+	tableDataCaches = make(map[uint]map[string]*tableDataCache) // 按玩家ID分组的表数据缓存
+	lastAccessTime  = make(map[uint]time.Time)                  // 玩家最后访问时间记录
+	cacheMutex      sync.RWMutex                                // 缓存读写锁
+	globalDB        *gorm.DB                                    // 全局数据库连接
+	tableFactories  = make(map[string]func() interface{})        // 表名到结构体工厂函数的映射（接口方式-断言+接口）
+	tableTypes      = make(map[string]reflect.Type)              // 表名到结构体类型的映射（反射方式）
+	tableModelFactories = make(map[string]func() DataModel)      // 表名到结构体工厂函数的映射（纯接口方式）
+)
+
+// tableDataCache 结构体定义表数据缓存项
+type tableDataCache struct {
+	data       interface{} // 存储的实际数据
+	expireTime time.Time   // 缓存过期时间
+}
+
+// Player 结构体定义玩家对象
+type Player struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `json:"name"`
+}
+
+// 定义表名
+func (Player) TableName() string {
+	return "players"
+}
+
+// FetchByPlayerID 实现DataModel接口的查询方法
+func (p *Player) FetchByPlayerID(db *gorm.DB, playerID uint) (interface{}, error) {
+	var player Player
+	if err := db.Where("id = ?", playerID).First(&player).Error; err != nil {
+		return nil, err
+	}
+	return player, nil
+}
+
+// 定义InventoryItem结构体
+type InventoryItem struct {
+	ID       uint `gorm:"primaryKey"`
+	PlayerID uint
+	ItemID   uint
+	Quantity int
+}
+
+// 为InventoryItem定义表名方法
+func (InventoryItem) TableName() string {
+	return "inventory"
+}
+
+// FetchByPlayerID 实现DataModel接口的查询方法
+func (i *InventoryItem) FetchByPlayerID(db *gorm.DB, playerID uint) (interface{}, error) {
+	var item InventoryItem
+	if err := db.Where("player_id = ?", playerID).First(&item).Error; err != nil {
+		// 如果查询不到，直接返回错误，与Player的处理方式一致
+		return nil, err
+	}
+	return item, nil
+}
+
+// 初始化表名到结构体工厂函数的映射（接口方式-断言+接口）
+func initTableFactories() {
+	tableFactories["players"] = func() interface{} { return &Player{} }
+	tableFactories["inventory"] = func() interface{} { return &InventoryItem{} }
+}
+
+// 初始化表名到结构体工厂函数的映射（纯接口方式）
+func initTableModelFactories() {
+	tableModelFactories["players"] = func() DataModel { return &Player{} }
+	tableModelFactories["inventory"] = func() DataModel { return &InventoryItem{} }
+}
+
+// 初始化表名到结构体类型的映射（反射方式）
+func initTableTypes() {
+	tableTypes["players"] = reflect.TypeOf(Player{})
+	tableTypes["inventory"] = reflect.TypeOf(InventoryItem{})
+}
+
+// GetDataUsingReflection 使用反射机制实现表数据缓存的获取逻辑
+	func (t *tableDataCache) GetDataUsingReflection(db *gorm.DB, playerID uint, tableName string) (interface{}, error) {
+		if time.Now().Before(t.expireTime) && t.data != nil {
+			fmt.Printf("[INFO] Cache hit for player %d, table %s\n", playerID, tableName)
+			return t.data, nil // 缓存未过期且有数据，直接返回
+		}
+
+	// 缓存已过期或为空，重新加载数据
+	var newData interface{}
+
+	// 检查是否有对应的表结构体类型（反射方式）
+	structType, exists := tableTypes[tableName]
+	if exists {
+		// 创建新的结构体指针实例
+		structPtr := reflect.New(structType)
+		structValue := structPtr.Elem()
+
+		// 使用反射查找并设置查询条件
+		var queryField string
+
+		// 根据不同表确定查询字段
+		if tableName == "players" {
+			queryField = "id"
+		} else {
+			queryField = "player_id"
+		}
+
+		// 执行数据库查询
+		result := db.Where(queryField+" = ?", playerID).First(structPtr.Interface())
+
+		if result.Error != nil {
+			// 处理查询错误
+			if result.Error == gorm.ErrRecordNotFound {
+				// 如果是记录不存在的错误，可以提供默认值
+			log.Printf("[WARNING] Record not found for player %d in table %s\n", playerID, tableName)
+				
+				// 对于inventory表，如果不存在则使用模拟数据
+				if tableName == "inventory" {
+					// 根据之前的修改，查询不到数据时应直接返回错误，与Player的处理方式一致
+				return nil, result.Error
+				} else {
+					// 其他表直接返回错误
+					return nil, result.Error
+				}
+			} else {
+				log.Printf("[ERROR] Database error for table %s: %v\n", tableName, result.Error)
+				return nil, result.Error
+			}
+		} else {
+			// 查询成功，获取数据
+			newData = structValue.Interface()
+		}
+	} else {
+		// 对于未注册的表，返回简单的状态信息
+		log.Printf("[WARNING] No type registered for table: %s\n", tableName)
+		newData = map[string]interface{}{
+			"player_id": playerID,
+			"table":     tableName,
+			"status":    "data fetched",
+		}
+	}
+
+	// 更新缓存数据和过期时间
+	t.data = newData
+	t.expireTime = time.Now().Add(5 * time.Minute) // 设置5分钟缓存有效期
+	fmt.Printf("[INFO] Data loaded via reflection for player %d, table %s: %+v\n", playerID, tableName, newData)
+	return newData, nil
+}
+
+// GetData 实现表数据缓存的获取逻辑（断言+接口方式）
+	func (t *tableDataCache) GetData(db *gorm.DB, playerID uint, tableName string) (interface{}, error) {
+		if time.Now().Before(t.expireTime) && t.data != nil {
+			fmt.Printf("[INFO] Cache hit for player %d, table %s\n", playerID, tableName)
+			return t.data, nil // 缓存未过期且有数据，直接返回
+		}
+
+	// 缓存已过期或为空，重新加载数据
+	var newData interface{}
+
+	// 检查是否有对应的表结构体工厂函数
+	factory, exists := tableFactories[tableName]
+	if exists {
+		// 创建对应表的结构体实例
+		model := factory()
+		
+		// 尝试将model转换为DataModel接口（类型断言）
+		if dataModel, ok := model.(DataModel); ok {
+			// 通过接口调用查询方法
+			data, err := dataModel.FetchByPlayerID(db, playerID)
+			if err != nil {
+				log.Printf("[ERROR] Data fetch error for table %s: %v\n", tableName, err)
+				return nil, err
+			}
+			newData = data
+		} else {
+			// 如果模型没有实现DataModel接口，使用默认处理
+				log.Printf("[WARNING] Model for table %s does not implement DataModel interface\n", tableName)
+			newData = model
+		}
+	} else {
+		// 对于未注册的表，返回简单的状态信息
+			log.Printf("[WARNING] No factory found for table: %s\n", tableName)
+		newData = map[string]interface{}{
+			"player_id": playerID,
+			"table":     tableName,
+			"status":    "data fetched",
+		}
+	}
+
+	// 更新缓存数据和过期时间
+	t.data = newData
+	t.expireTime = time.Now().Add(5 * time.Minute) // 设置5分钟缓存有效期
+	fmt.Printf("[INFO] Data loaded (断言+接口) for player %d, table %s: %+v\n", playerID, tableName, newData)
+	return newData, nil
+}
+
+// GetDataPureInterface 实现表数据缓存的获取逻辑（纯接口方式）
+func (t *tableDataCache) GetDataPureInterface(db *gorm.DB, playerID uint, tableName string) (interface{}, error) {
+	if time.Now().Before(t.expireTime) && t.data != nil {
+		fmt.Printf("[INFO] Cache hit for player %d, table %s\n", playerID, tableName)
+		return t.data, nil // 缓存未过期且有数据，直接返回
+	}
+
+	// 缓存已过期或为空，重新加载数据
+	var newData interface{}
+
+	// 检查是否有对应的表结构体工厂函数（直接返回DataModel接口）
+	factory, exists := tableModelFactories[tableName]
+	if exists {
+		// 直接获取DataModel接口实例（无需类型断言）
+		dataModel := factory()
+		// 通过接口调用查询方法
+		data, err := dataModel.FetchByPlayerID(db, playerID)
+		if err != nil {
+			log.Printf("[ERROR] Data fetch error for table %s: %v\n", tableName, err)
+			return nil, err
+		}
+		newData = data
+	} else {
+		// 对于未注册的表，返回简单的状态信息
+		log.Printf("[WARNING] No pure interface factory found for table: %s\n", tableName)
+		newData = map[string]interface{}{
+			"player_id": playerID,
+			"table":     tableName,
+			"status":    "data fetched via pure interface",
+		}
+	}
+
+	// 更新缓存数据和过期时间
+	t.data = newData
+	t.expireTime = time.Now().Add(5 * time.Minute) // 设置5分钟缓存有效期
+	fmt.Printf("[INFO] Data loaded (纯接口) for player %d, table %s: %+v\n", playerID, tableName, newData)
+	return newData, nil
+}
+
+// initDB 初始化全局数据库连接
+func initDB() {
+	var err error
+	globalDB, err = gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+
+	// 初始化表名到结构体工厂函数的映射（接口方式-断言+接口）
+	initTableFactories()
+	// 初始化表名到结构体工厂函数的映射（纯接口方式）
+	initTableModelFactories()
+	// 初始化表名到结构体类型的映射（反射方式）
+	initTableTypes()
+
+	// 配置数据库连接池（可选）
+	sqlDB, err := globalDB.DB()
+	if err != nil {
+		log.Fatalf("Failed to get raw DB connection: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(10)           // 最大打开连接数
+	sqlDB.SetMaxIdleConns(5)            // 最大空闲连接数
+	sqlDB.SetConnMaxLifetime(time.Hour) // 连接最大存活时间
+}
+
+// startCacheCleaner 启动定时缓存清理任务
+func startCacheCleaner(interval time.Duration, idleThreshold time.Duration) {
+	ticker := time.NewTicker(interval)
+	go func() {
+		for range ticker.C {
+			cacheMutex.Lock()
+			now := time.Now()
+
+			// 清理长时间未访问的玩家缓存
+			for playerID, lastTime := range lastAccessTime {
+				if now.Sub(lastTime) > idleThreshold {
+					delete(playerCache, playerID)
+					delete(lastAccessTime, playerID)
+					delete(tableDataCaches, playerID) // 同时清理该玩家的所有表缓存
+					log.Printf("Cleared all caches for player %d (idle > %v)", playerID, idleThreshold)
+				}
+			}
+
+			// 清理孤立的表缓存（没有对应玩家缓存的情况）
+			for playerID := range tableDataCaches {
+				if _, exists := playerCache[playerID]; !exists {
+					delete(tableDataCaches, playerID)
+				}
+			}
+
+			cacheMutex.Unlock()
+		}
+	}()
+}
+
+// GetTableDataByID 获取指定玩家和表的数据（带缓存，断言+接口方式）
+func GetTableDataByID(playerID uint, tableName string) (interface{}, error) {
+	cacheMutex.RLock()
+	defer cacheMutex.RUnlock()
+
+	// 更新最后访问时间
+	lastAccessTime[playerID] = time.Now()
+
+	// 获取或创建玩家缓存
+	player, exists := playerCache[playerID]
+	if !exists {
+		var p Player
+		result := globalDB.Where("id = ?", playerID).First(&p)
+		if result.Error != nil {
+			return nil, fmt.Errorf("player %d not found: %v", playerID, result.Error)
+		}
+		player = &p
+		// player.DB = globalDB // 已移除Player结构体中的DB字段
+		playerCache[playerID] = player
+	}
+
+	// 获取或创建表缓存
+	tableCaches, exists := tableDataCaches[playerID]
+	if !exists {
+		tableCaches = make(map[string]*tableDataCache)
+		tableDataCaches[playerID] = tableCaches
+	}
+
+	tableCache, exists := tableCaches[tableName]
+	if !exists {
+		// 初始化新缓存项
+		tableCache = &tableDataCache{
+			expireTime: time.Now().Add(5 * time.Minute), // 初始过期时间
+		}
+		tableCaches[tableName] = tableCache
+	}
+
+	// 从缓存获取数据（自动处理过期）
+	return tableCache.GetData(globalDB, playerID, tableName)
+}
+
+// GetTableDataByIDPureInterface 获取指定玩家和表的数据（带缓存，纯接口方式）
+func GetTableDataByIDPureInterface(playerID uint, tableName string) (interface{}, error) {
+	cacheMutex.RLock()
+	defer cacheMutex.RUnlock()
+
+	// 更新最后访问时间
+	lastAccessTime[playerID] = time.Now()
+
+	// 获取或创建玩家缓存
+	player, exists := playerCache[playerID]
+	if !exists {
+		var p Player
+		result := globalDB.Where("id = ?", playerID).First(&p)
+		if result.Error != nil {
+			return nil, fmt.Errorf("player %d not found: %v", playerID, result.Error)
+		}
+		player = &p
+		playerCache[playerID] = player
+	}
+
+	// 获取或创建表缓存
+	tableCaches, exists := tableDataCaches[playerID]
+	if !exists {
+		tableCaches = make(map[string]*tableDataCache)
+		tableDataCaches[playerID] = tableCaches
+	}
+
+	tableCache, exists := tableCaches[tableName]
+	if !exists {
+		// 初始化新缓存项
+		tableCache = &tableDataCache{
+			expireTime: time.Now().Add(5 * time.Minute), // 初始过期时间
+		}
+		tableCaches[tableName] = tableCache
+	}
+
+	// 使用纯接口方式获取数据
+	return tableCache.GetDataPureInterface(globalDB, playerID, tableName)
+}
+
+// GetTableDataByIDUsingReflection 使用反射方式获取指定玩家和表的数据（带缓存）
+func GetTableDataByIDUsingReflection(playerID uint, tableName string) (interface{}, error) {
+	cacheMutex.RLock()
+	defer cacheMutex.RUnlock()
+
+	// 更新最后访问时间
+	lastAccessTime[playerID] = time.Now()
+
+	// 获取或创建玩家缓存
+	player, exists := playerCache[playerID]
+	if !exists {
+		var p Player
+		result := globalDB.Where("id = ?", playerID).First(&p)
+		if result.Error != nil {
+			return nil, fmt.Errorf("player %d not found: %v", playerID, result.Error)
+		}
+		player = &p
+		playerCache[playerID] = player
+	}
+
+	// 获取或创建表缓存
+	tableCaches, exists := tableDataCaches[playerID]
+	if !exists {
+		tableCaches = make(map[string]*tableDataCache)
+		tableDataCaches[playerID] = tableCaches
+	}
+
+	tableCache, exists := tableCaches[tableName]
+	if !exists {
+		// 初始化新缓存项
+		tableCache = &tableDataCache{
+			expireTime: time.Now().Add(5 * time.Minute), // 初始过期时间
+		}
+		tableCaches[tableName] = tableCache
+	}
+
+	// 使用反射方式从缓存获取数据（自动处理过期）
+	return tableCache.GetDataUsingReflection(globalDB, playerID, tableName)
+}
+
+// main 函数（示例用法）
+func main() {
+	// 初始化数据库
+	initDB()
+
+	fmt.Println("Database initialized successfully")
+
+	// 创建测试表（如果不存在）
+	err := globalDB.AutoMigrate(&Player{})
+	if err != nil {
+		log.Printf("[ERROR] AutoMigrate failed: %v\n", err)
+	} else {
+		fmt.Printf("[INFO] Players table created or exists\n")
+	}
+
+	// 插入测试数据
+	playerID := uint(123)
+	testPlayer := Player{
+		ID:   playerID,
+		Name: "TestPlayer",
+	}
+	// 使用Save方法，存在则更新，不存在则插入
+	result := globalDB.Save(&testPlayer)
+	if result.Error != nil {
+		log.Printf("[ERROR] Failed to save test player: %v\n", result.Error)
+	} else {
+		fmt.Printf("[INFO] Test player saved successfully: %+v\n", testPlayer)
+		// 验证数据是否正确插入
+		var savedPlayer Player
+		globalDB.Where("id = ?", playerID).First(&savedPlayer)
+		fmt.Printf("[INFO] Verified saved player: %+v\n", savedPlayer)
+	}
+
+	// 启动定时缓存清理（为了测试方便，将间隔和阈值设置小一些）
+	startCacheCleaner(10*time.Second, 30*time.Second)
+
+	// ======== 断言+接口方式测试 ========
+	fmt.Println("\n=== Testing with Assertion+Interface Approach ===")
+	// 示例：获取玩家123的players表数据（断言+接口方式）
+	tableName := "players"
+
+	// 第一次获取（会查询数据库）
+	data, err := GetTableDataByID(playerID, tableName)
+	if err != nil {
+		log.Printf("[ERROR] First fetch failed: %v\n", err)
+	} else {
+		fmt.Printf("[INFO] First fetch (from DB): %+v\n", data)
+	}
+
+	// 测试获取inventory表数据（断言+接口方式）
+	tableName = "inventory"
+	data, err = GetTableDataByID(playerID, tableName)
+	if err != nil {
+		log.Printf("[ERROR] Inventory fetch failed: %v\n", err)
+	} else {
+		fmt.Printf("[INFO] Inventory data: %+v\n", data)
+	}
+
+	// 第二次获取玩家数据（使用缓存，断言+接口方式）
+	tableName = "players"
+	cachedData, err := GetTableDataByID(playerID, tableName)
+	if err != nil {
+		log.Printf("[ERROR] Second fetch failed: %v\n", err)
+	} else {
+		fmt.Printf("[INFO] Second fetch (from cache): %+v\n", cachedData)
+	}
+
+	// ======== 清除缓存，为纯接口测试做准备 ========
+	fmt.Println("\n=== Clearing Cache for Pure Interface Test ===")
+	cacheMutex.Lock()
+	delete(tableDataCaches, playerID) // 清除指定玩家的所有表缓存
+	cacheMutex.Unlock()
+	fmt.Println("Cache cleared successfully")
+
+	// ======== 纯接口方式测试 ========
+	fmt.Println("\n=== Testing with Pure Interface Approach ===")
+	// 示例：获取玩家123的players表数据（纯接口方式）
+	tableName = "players"
+
+	// 第一次获取（会查询数据库，因为缓存已清除）
+	pureData, err := GetTableDataByIDPureInterface(playerID, tableName)
+	if err != nil {
+		log.Printf("[ERROR] First pure interface fetch failed: %v\n", err)
+	} else {
+		fmt.Printf("[INFO] First pure interface fetch (from DB): %+v\n", pureData)
+	}
+
+	// 测试获取inventory表数据（纯接口方式）
+	tableName = "inventory"
+	pureData, err = GetTableDataByIDPureInterface(playerID, tableName)
+	if err != nil {
+		log.Printf("[ERROR] Pure interface inventory fetch failed: %v\n", err)
+	} else {
+		fmt.Printf("[INFO] Pure interface inventory data: %+v\n", pureData)
+	}
+
+	// 第二次获取玩家数据（使用缓存，纯接口方式）
+	tableName = "players"
+	pureCachedData, err := GetTableDataByIDPureInterface(playerID, tableName)
+	if err != nil {
+		log.Printf("[ERROR] Second pure interface fetch failed: %v\n", err)
+	} else {
+		fmt.Printf("[INFO] Second pure interface fetch (from cache): %+v\n", pureCachedData)
+	}
+
+	// ======== 清除缓存，为反射测试做准备 ========
+	fmt.Println("\n=== Clearing Cache for Reflection Test ===")
+	cacheMutex.Lock()
+	delete(tableDataCaches, playerID) // 清除指定玩家的所有表缓存
+	cacheMutex.Unlock()
+	fmt.Println("Cache cleared successfully")
+
+	// ======== 反射方式测试 ========
+	fmt.Println("\n=== Testing with Reflection Approach ===")
+	// 示例：获取玩家123的players表数据（反射方式）
+	tableName = "players"
+
+	// 第一次获取（会查询数据库，反射方式）
+	reflectData, err := GetTableDataByIDUsingReflection(playerID, tableName)
+	if err != nil {
+		log.Printf("[ERROR] First reflection fetch failed: %v\n", err)
+	} else {
+		fmt.Printf("[INFO] First reflection fetch (from DB): %+v\n", reflectData)
+	}
+
+	// 测试获取inventory表数据（反射方式）
+	tableName = "inventory"
+	reflectData, err = GetTableDataByIDUsingReflection(playerID, tableName)
+	if err != nil {
+		log.Printf("[ERROR] Reflection inventory fetch failed: %v\n", err)
+	} else {
+		fmt.Printf("[INFO] Reflection inventory data: %+v\n", reflectData)
+	}
+
+	// 第二次获取玩家数据（使用缓存，反射方式）
+	tableName = "players"
+	reflectCachedData, err := GetTableDataByIDUsingReflection(playerID, tableName)
+	if err != nil {
+		log.Printf("[ERROR] Second reflection fetch failed: %v\n", err)
+	} else {
+		fmt.Printf("[INFO] Second reflection fetch (from cache): %+v\n", reflectCachedData)
+	}
+
+	// 测试查询不存在的玩家ID
+	nonExistingPlayerID := uint(999)
+	nonExistingData, err := GetTableDataByID(nonExistingPlayerID, "players")
+	fmt.Printf("\n[INFO] Non-existing player fetch: data=%+v, err=%v\n", nonExistingData, err)
+
+	fmt.Println("\nProgram completed successfully")
+}
