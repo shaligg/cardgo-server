@@ -1,4 +1,4 @@
-package app
+package handler
 
 import (
 	"context"
@@ -16,11 +16,11 @@ import (
 )
 
 func TestBizDispatcherIgnoresPayloadUID(t *testing.T) {
-	router := newBizRouter()
+	router := NewRouter()
 	router.Register(9001, func(ctx context.Context, targetUID string, payload json.RawMessage) (interface{}, *terrors.BizError) {
 		return targetUID, nil
 	})
-	dispatcher := newBizDispatcher(router, nil)
+	dispatcher := NewDispatcher(router, nil)
 
 	resp, err := dispatcher.Handle(context.Background(), "auth_uid", 9001, json.RawMessage(`{"uid":"evil_uid"}`))
 	if err != nil {

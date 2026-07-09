@@ -1,4 +1,4 @@
-package app
+package handler
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 )
 
 func TestBizRouterReturnsUnsupportedOpCode(t *testing.T) {
-	router := newBizRouter()
+	router := NewRouter()
 	_, err := router.Handle(context.Background(), 999999, "u1", nil)
 	if err == nil {
 		t.Fatal("err is nil, want unsupported op_code error")
@@ -20,7 +20,7 @@ func TestBizRouterReturnsUnsupportedOpCode(t *testing.T) {
 }
 
 func TestRegisterBizRoutesCanDisableDebugOps(t *testing.T) {
-	router := newBizRouter()
+	router := NewRouter()
 	registerBizRoutes(router, &playerHandler{}, &assetHandler{}, &cardHandler{}, &levelHandler{}, &workshopHandler{}, false)
 
 	if _, ok := router.handlers[protocol.OpPlayerGetProfile]; !ok {
@@ -39,7 +39,7 @@ func TestRegisterBizRoutesCanDisableDebugOps(t *testing.T) {
 }
 
 func TestRegisterBizRoutesCanEnableDebugOps(t *testing.T) {
-	router := newBizRouter()
+	router := NewRouter()
 	registerBizRoutes(router, &playerHandler{}, &assetHandler{}, &cardHandler{}, &levelHandler{}, &workshopHandler{}, true)
 
 	for _, opCode := range []int32{

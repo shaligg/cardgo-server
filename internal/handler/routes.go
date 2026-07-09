@@ -1,4 +1,4 @@
-package app
+package handler
 
 import (
 	"github.com/bigfish/go_orm_1/internal/contract/protocol"
@@ -11,11 +11,11 @@ import (
 	"github.com/bigfish/go_orm_1/internal/platform/state"
 )
 
-// newRegisteredBizRouter 创建并注册所有 WS 业务协议。
+// NewRegisteredRouter 创建并注册所有游戏业务协议。
 //
 // 这里是统一协议绑定表；阅读本函数即可看到本期所有 op_code 对应的处理函数。
-func newRegisteredBizRouter(playerService playersvc.Service, assetService assetsvc.Service, inventoryService inventorysvc.Service, cardService cardsvc.Service, battleService *battlesvc.Service, workshopService workshopsvc.Service, online *state.OnlineState, enableDebugOps bool) *bizRouter {
-	router := newBizRouter()
+func NewRegisteredRouter(playerService playersvc.Service, assetService assetsvc.Service, inventoryService inventorysvc.Service, cardService cardsvc.Service, battleService *battlesvc.Service, workshopService workshopsvc.Service, online *state.OnlineState, enableDebugOps bool) *Router {
+	router := NewRouter()
 	player := newPlayerHandler(playerService, online)
 	asset := newAssetHandler(assetService, inventoryService)
 	card := newCardHandler(cardService, online)
@@ -26,7 +26,7 @@ func newRegisteredBizRouter(playerService playersvc.Service, assetService assets
 	return router
 }
 
-func registerBizRoutes(router *bizRouter, player *playerHandler, asset *assetHandler, card *cardHandler, level *levelHandler, workshop *workshopHandler, enableDebugOps bool) {
+func registerBizRoutes(router *Router, player *playerHandler, asset *assetHandler, card *cardHandler, level *levelHandler, workshop *workshopHandler, enableDebugOps bool) {
 	router.Register(protocol.OpPlayerGetProfile, player.GetProfile)
 
 	router.Register(protocol.OpAssetGetInventory, asset.GetInventory)

@@ -1114,13 +1114,18 @@ go_game_server/
 │   ├── app/
 │   │   ├── bootstrap.go
 │   │   ├── lifecycle.go
-│   │   ├── biz_dispatcher.go       # WS 业务入口：解析 op_code、分片串行、调用路由
-│   │   ├── biz_router.go           # 纯路由表：op_code -> handler
-│   │   ├── biz_routes.go           # 统一协议绑定表：集中查看所有协议号对应函数
+│   │   ├── config.go
+│   │   ├── metrics_hooks.go
+│   │   └── state_restore.go
+│   ├── handler/                    # 游戏业务协议入口，不绑定 WS/TCP
+│   │   ├── dispatcher.go           # 业务入口：接收 op_code、分片串行、调用路由
+│   │   ├── router.go               # 纯路由表：op_code -> handler
+│   │   ├── routes.go               # 统一协议绑定表：集中查看所有协议号对应函数
 │   │   ├── player_handler.go       # 玩家协议处理函数
 │   │   ├── asset_handler.go        # 资产/背包协议处理函数
 │   │   ├── card_handler.go         # 卡牌/卡组协议处理函数
-│   │   └── level_handler.go        # 关卡协议处理函数
+│   │   ├── level_handler.go        # 关卡协议处理函数
+│   │   └── workshop_handler.go     # 工坊协议处理函数
 │   ├── contract/                   # 协议契约，不放框架实现，也不放玩法规则
 │   │   └── protocol/
 │   │       ├── opcode.go           # 全量 op_code 常量，禁止业务代码写裸数字
@@ -1894,11 +1899,11 @@ type GlobalJobResult struct {
 ```text
 gateway/ws.Server
   -> BizHandler.Handle(ctx, uid, op_code, payload)
-  -> app.bizDispatcher.Handle
+  -> handler.Dispatcher.Handle
       - 接收 Envelope.op_code
       - 确定 target_uid
       - 按 uid 投递到 ShardExecutor
-  -> app.bizRouter.Handle(op_code, target_uid, payload)
+  -> handler.Router.Handle(op_code, target_uid, payload)
       - handlers[op_code]
   -> module Handler method
       - PlayerHandler / AssetHandler / LevelHandler / ...
@@ -1912,13 +1917,14 @@ gateway/ws.Server
 | `internal/contract/protocol/opcode.go` | 维护全量 `op_code` 常量，是协议号统一索引表 |
 | `internal/contract/protocol/request.go` | 维护 WS `payload` 请求 DTO；当前使用 JSON tag，未来切 protobuf 时优先替换协议 DTO/编解码层 |
 | `internal/framework/gateway/ws/codec.go` | 维护 `EnvelopeCodec`；当前 `JSONEnvelopeCodec`，未来可替换 protobuf/binary codec |
-| `internal/app/biz_dispatcher.go` | WS 业务入口，接收 Envelope `op_code`、选择路由键、分片串行执行 |
-| `internal/app/biz_router.go` | 纯路由表，只维护 `map[op_code]handler`，不持有业务 Service |
-| `internal/app/biz_routes.go` | 统一注册所有协议绑定关系，例如 `1003 -> PlayerHandler.ConsumeGold` |
-| `internal/app/player_handler.go` | 玩家协议处理函数，持有 `PlayerService` 与在线状态依赖 |
-| `internal/app/asset_handler.go` | 资产/背包协议处理函数，持有 `AssetService/InventoryService` |
-| `internal/app/card_handler.go` | 卡牌协议处理函数，持有 `CardService` |
-| `internal/app/level_handler.go` | 关卡协议处理函数，持有 `BattleService` |
+| `internal/handler/dispatcher.go` | 业务协议入口，接收 Envelope `op_code`、选择路由键、分片串行执行 |
+| `internal/handler/router.go` | 纯路由表，只维护 `map[op_code]handler`，不持有业务 Service |
+| `internal/handler/routes.go` | 统一注册所有协议绑定关系，例如 `1003 -> PlayerHandler.ConsumeGold` |
+| `internal/handler/player_handler.go` | 玩家协议处理函数，持有 `PlayerService` 与在线状态依赖 |
+| `internal/handler/asset_handler.go` | 资产/背包协议处理函数，持有 `AssetService/InventoryService` |
+| `internal/handler/card_handler.go` | 卡牌协议处理函数，持有 `CardService` |
+| `internal/handler/level_handler.go` | 关卡协议处理函数，持有 `BattleService` |
+| `internal/handler/workshop_handler.go` | 工坊协议处理函数，持有 `WorkshopService` |
 
 注册规则：
 

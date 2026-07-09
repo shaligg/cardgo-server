@@ -16,6 +16,7 @@ import (
 	playergame "github.com/bigfish/go_orm_1/internal/game/player"
 	workshopgame "github.com/bigfish/go_orm_1/internal/game/workshop"
 	"github.com/bigfish/go_orm_1/internal/gamedata"
+	"github.com/bigfish/go_orm_1/internal/handler"
 	"github.com/bigfish/go_orm_1/internal/infra/cache"
 	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	ilog "github.com/bigfish/go_orm_1/internal/infra/log"
@@ -101,8 +102,8 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 	verifier := auth.Verifier{NonceStore: nonceStore}
 	sessionManager := session.NewMemoryManager()
 	lastServerStore := session.NewMemoryLastServerStore()
-	bizRouter := newRegisteredBizRouter(playerService, assetService, inventoryService, cardService, battleService, workshopService, onlineState, cfg.Debug.EnableWSDebugOps)
-	bizDispatcher := newBizDispatcher(bizRouter, shardExec)
+	bizRouter := handler.NewRegisteredRouter(playerService, assetService, inventoryService, cardService, battleService, workshopService, onlineState, cfg.Debug.EnableWSDebugOps)
+	bizDispatcher := handler.NewDispatcher(bizRouter, shardExec)
 	wsServer := ws.NewServer(ws.Options{
 		NodeID:         cfg.Server.NodeID,
 		Addr:           fmt.Sprintf("%s:%d", cfg.Server.WSHost, cfg.Server.WSPort),

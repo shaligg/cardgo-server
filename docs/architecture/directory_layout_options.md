@@ -52,9 +52,9 @@
 cmd/gameserver/main.go
   -> internal/app.Bootstrap
   -> internal/framework/gateway/ws
-  -> internal/app.bizDispatcher
-  -> internal/app.bizRouter
-  -> internal/app.*Handler
+  -> internal/handler.Dispatcher
+  -> internal/handler.Router
+  -> internal/handler.*Handler
   -> internal/game/*Service
   -> internal/repo
   -> internal/infra/db
@@ -69,16 +69,17 @@ internal/game          玩法业务
 internal/repo          数据访问
 internal/infra         基础设施
 internal/contract      协议契约
-internal/app           应用装配 + WS 业务 handler
+internal/app           应用装配、生命周期、配置
+internal/handler       游戏业务协议入口
 ```
 
-主要问题只有一个：
+当前已经完成第一步收敛：
 
 ```text
-internal/app 里混合了“应用装配”和“业务协议 handler”。
+业务协议 handler 已从 internal/app 迁移到 internal/handler。
 ```
 
-其中合理放在 `app` 的文件：
+现在保留在 `app` 的文件：
 
 ```text
 bootstrap.go
@@ -88,21 +89,21 @@ metrics_hooks.go
 state_restore.go
 ```
 
-更像业务协议入口的文件：
+现在位于 `handler` 的文件：
 
 ```text
-biz_dispatcher.go
-biz_router.go
-biz_routes.go
+dispatcher.go
+router.go
+routes.go
 player_handler.go
 asset_handler.go
 card_handler.go
 level_handler.go
 workshop_handler.go
-biz_helpers.go
+helpers.go
 ```
 
-这不是严重问题，但后续玩法变多后，`app` 会变成“大杂烩”。
+剩余可选优化是把 `internal/app` 进一步收敛为 `internal/app/gameserver`，让目录显式表达“这是 gameserver 进程的启动装配层”。
 
 ## 4. 目录职责原则
 
@@ -130,15 +131,15 @@ biz_helpers.go
 
 | 方案 | 核心做法 | 改动量 | 清晰度 | 扩展性 | 当前推荐 |
 |---|---|---:|---:|---:|---|
-| 方案 A：保持现状 | `app` 继续同时放装配和 handler | 低 | 中 | 中 | 不推荐长期用 |
-| 方案 B：横向分层 | `app/gameserver` 管启动，`handler` 管协议，`game` 管玩法 | 中 | 高 | 高 | 推荐 |
+| 方案 A：保持现状 | `app` 继续放启动装配，`handler` 已独立 | 低 | 中高 | 中 | 可短期保持 |
+| 方案 B：横向分层 | `app/gameserver` 管启动，`handler` 管协议，`game` 管玩法 | 中 | 高 | 高 | 推荐继续演进 |
 | 方案 C：纵向玩法模块 | 每个玩法目录内放 handler/service/repo | 高 | 中 | 中高 | 只适合局部复杂玩法借鉴 |
 | 方案 D：进程优先 | 先按 gameserver/loginserver/globalserver 拆 | 高 | 中高 | 高 | 当前过重 |
 
 当前判断：
 
 ```text
-采用方案 B 作为主方案。
+已完成方案 B 的第一步：`handler` 独立。
 复杂玩法内部吸收方案 C 的优点。
 暂不采用方案 D 的完整多进程目录。
 ```
@@ -703,7 +704,7 @@ Client
 
 为了降低风险，建议分三步迁移，不一次性大重构。
 
-### 11.1 第一步：只迁移 handler
+### 11.1 第一步：只迁移 handler（已完成）
 
 目标：把 `internal/app` 中的业务协议入口移到 `internal/handler`。
 
@@ -731,7 +732,7 @@ internal/app/metrics_hooks.go
 internal/app/state_restore.go
 ```
 
-调整：
+已调整：
 
 ```text
 internal/app/bootstrap.go import internal/handler
