@@ -1112,11 +1112,12 @@ go_game_server/
 │   └── config.prod.yaml
 ├── internal/
 │   ├── app/
-│   │   ├── bootstrap.go
-│   │   ├── lifecycle.go
-│   │   ├── config.go
-│   │   ├── metrics_hooks.go
-│   │   └── state_restore.go
+│   │   └── gameserver/
+│   │       ├── bootstrap.go
+│   │       ├── lifecycle.go
+│   │       ├── config.go
+│   │       ├── metrics_hooks.go
+│   │       └── state_restore.go
 │   ├── handler/                    # 游戏业务协议入口，不绑定 WS/TCP
 │   │   ├── dispatcher.go           # 业务入口：接收 op_code、分片串行、调用路由
 │   │   ├── router.go               # 纯路由表：op_code -> handler
@@ -1248,7 +1249,7 @@ go_game_server/
 | 框架层 | `internal/framework` | 标准库、少量基础第三方库、必要的平台抽象接口 | `internal/game`、`internal/globalcore`、具体业务 Service |
 | 协议契约层 | `internal/contract` | 标准库 | 具体 Handler、Service、Repo |
 | 平台层 | `internal/platform` | `internal/framework`、`internal/infra` | 具体玩法规则 |
-| 应用组装层 | `internal/app` | `framework/platform/contract/game/repo/infra` | 不写核心业务规则 |
+| 应用组装层 | `internal/app/gameserver` | `framework/platform/contract/game/repo/infra` | 不写核心业务规则 |
 | 业务层 | `internal/game`、`internal/globalcore`、`internal/globalserver` | `contract`、`repo`、`gamedata`、必要的 `platform` 接口 | `framework/gateway/ws` 这类网络接入实现 |
 | 数据与基础设施 | `internal/repo`、`internal/gamedata`、`internal/infra` | 标准库、数据库/缓存驱动 | 具体 WS Handler、Gateway |
 | 项目内通用工具 | `internal/pkg` | 标准库、同层更底层 `internal/pkg/*` | `app`、`game`、`repo`、`infra`、`platform`、`framework` |

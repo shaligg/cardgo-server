@@ -6,14 +6,14 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/bigfish/go_orm_1/internal/app"
+	gameserver "github.com/bigfish/go_orm_1/internal/app/gameserver"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	a, err := app.Bootstrap(ctx)
+	a, err := gameserver.Bootstrap(ctx)
 	if err != nil {
 		log.Fatalf("bootstrap failed: %v", err)
 	}

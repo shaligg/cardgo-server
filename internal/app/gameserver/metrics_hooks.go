@@ -1,4 +1,4 @@
-package app
+package gameserver
 
 import (
 	"github.com/bigfish/go_orm_1/internal/infra/metrics"

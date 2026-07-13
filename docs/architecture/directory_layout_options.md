@@ -50,7 +50,7 @@
 
 ```text
 cmd/gameserver/main.go
-  -> internal/app.Bootstrap
+  -> internal/app/gameserver.Bootstrap
   -> internal/framework/gateway/ws
   -> internal/handler.Dispatcher
   -> internal/handler.Router
@@ -69,17 +69,18 @@ internal/game          玩法业务
 internal/repo          数据访问
 internal/infra         基础设施
 internal/contract      协议契约
-internal/app           应用装配、生命周期、配置
+internal/app/gameserver 应用装配、生命周期、配置
 internal/handler       游戏业务协议入口
 ```
 
-当前已经完成第一步收敛：
+当前已经完成两步收敛：
 
 ```text
 业务协议 handler 已从 internal/app 迁移到 internal/handler。
+gameserver 启动装配已从 internal/app 迁移到 internal/app/gameserver。
 ```
 
-现在保留在 `app` 的文件：
+现在位于 `app/gameserver` 的文件：
 
 ```text
 bootstrap.go
@@ -103,7 +104,7 @@ workshop_handler.go
 helpers.go
 ```
 
-剩余可选优化是把 `internal/app` 进一步收敛为 `internal/app/gameserver`，让目录显式表达“这是 gameserver 进程的启动装配层”。
+后续如果管理接口继续增加，再评估是否从 `bootstrap.go` 拆出 `admin_http.go`。
 
 ## 4. 目录职责原则
 
@@ -131,15 +132,15 @@ helpers.go
 
 | 方案 | 核心做法 | 改动量 | 清晰度 | 扩展性 | 当前推荐 |
 |---|---|---:|---:|---:|---|
-| 方案 A：保持现状 | `app` 继续放启动装配，`handler` 已独立 | 低 | 中高 | 中 | 可短期保持 |
-| 方案 B：横向分层 | `app/gameserver` 管启动，`handler` 管协议，`game` 管玩法 | 中 | 高 | 高 | 推荐继续演进 |
+| 方案 A：保持现状 | `app` 继续放启动装配，`handler` 已独立 | 低 | 中高 | 中 | 已不采用 |
+| 方案 B：横向分层 | `app/gameserver` 管启动，`handler` 管协议，`game` 管玩法 | 中 | 高 | 高 | 已采用 |
 | 方案 C：纵向玩法模块 | 每个玩法目录内放 handler/service/repo | 高 | 中 | 中高 | 只适合局部复杂玩法借鉴 |
 | 方案 D：进程优先 | 先按 gameserver/loginserver/globalserver 拆 | 高 | 中高 | 高 | 当前过重 |
 
 当前判断：
 
 ```text
-已完成方案 B 的第一步：`handler` 独立。
+已完成方案 B：`handler` 独立，`app/gameserver` 管启动装配。
 复杂玩法内部吸收方案 C 的优点。
 暂不采用方案 D 的完整多进程目录。
 ```
@@ -750,7 +751,7 @@ go test ./...
 go run ./scripts/loadtest/ws_prototype_smoke
 ```
 
-### 11.2 第二步：迁移 app 到 app/gameserver
+### 11.2 第二步：迁移 app 到 app/gameserver（已完成）
 
 目标：让 `app` 表达进程入口。
 
@@ -799,8 +800,7 @@ internal/app/gameserver/admin_http.go
 当前项目最适合的路线：
 
 ```text
-短期：采用方案 B，只把 handler 从 app 拆出来。
-中期：把 app 收敛为 app/gameserver。
+已采用方案 B：handler 从 app 拆出，app 收敛为 app/gameserver。
 长期：复杂玩法在 game/activity/<name> 内部纵向拆文件，但 handler 仍然集中。
 ```
 
@@ -811,11 +811,11 @@ internal/app/gameserver/admin_http.go
 3. 不建议把 handler 命名为 `handler/ws`。
 4. 不建议因为未来可能 protobuf，就现在重写协议层。
 
-推荐落地顺序：
+已完成落地顺序：
 
 ```text
-1. 先评审本方案。
-2. 如果确认，先迁移 internal/handler。
-3. 跑 go test ./...。
-4. 完成后再决定是否迁移 internal/app/gameserver。
+1. 完成方案对比文档。
+2. 迁移 internal/handler。
+3. 迁移 internal/app/gameserver。
+4. 每一步后跑 go test ./...。
 ```
