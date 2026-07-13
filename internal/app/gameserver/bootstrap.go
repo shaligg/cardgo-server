@@ -2,7 +2,6 @@ package gameserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -155,87 +154,10 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		},
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		drainMode := wsServer.IsDrainMode()
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"ready":      !drainMode,
-			"drain_mode": drainMode,
-			"node_id":    cfg.Server.NodeID,
-		})
-	})
-	mux.HandleFunc("/metricsz", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		writeJSON(w, http.StatusOK, metricsReg.Snapshot())
-	})
-	mux.HandleFunc("/admin/drain", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"code": 0,
-				"msg":  "ok",
-				"data": map[string]interface{}{
-					"drain_mode": wsServer.IsDrainMode(),
-				},
-			})
-		case http.MethodPost:
-			var req struct {
-				Enabled bool `json:"enabled"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]interface{}{
-					"code": "BAD_REQUEST",
-					"msg":  "invalid json",
-				})
-				return
-			}
-			wsServer.SetDrainMode(req.Enabled)
-			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"code": 0,
-				"msg":  "ok",
-				"data": map[string]interface{}{
-					"drain_mode": wsServer.IsDrainMode(),
-				},
-			})
-		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		}
-	})
-	mux.HandleFunc("/admin/sessions", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		count, err := sessionManager.Count(r.Context())
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
-				"code": "INTERNAL_ERROR",
-				"msg":  err.Error(),
-			})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"code": 0,
-			"msg":  "ok",
-			"data": map[string]interface{}{
-				"active_sessions": count,
-				"drain_mode":      wsServer.IsDrainMode(),
-			},
-		})
-	})
-	mux.Handle("/api/login", login.NewHTTPHandler(loginService))
-
 	apiAddr := fmt.Sprintf("%s:%d", cfg.Server.APIHost, cfg.Server.APIPort)
 	apiServer := &http.Server{
 		Addr:    apiAddr,
-		Handler: mux,
+		Handler: buildAPIMux(cfg, wsServer, metricsReg, sessionManager, loginService),
 	}
 
 	ilog.Infof("bootstrap done node=%s api=%s ws=%s", cfg.Server.NodeID, apiAddr, wsServer.Addr)

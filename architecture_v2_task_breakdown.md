@@ -345,6 +345,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 10. DONE：新增 `EnvelopeCodec` 抽象，当前使用 `JSONEnvelopeCodec`，为后续 protobuf/binary 替换预留边界。
 11. DONE：将业务协议入口从 `internal/app` 迁移到 `internal/handler`，`app` 回归应用装配、生命周期和配置职责。
 12. DONE：将 gameserver 启动装配从 `internal/app` 迁移到 `internal/app/gameserver`，让应用层显式表达进程边界。
+13. DONE：拆出 `internal/app/gameserver/admin_http.go`，收敛 health、metrics、drain、sessions 和 login API 路由组装。
 
 目标：
 

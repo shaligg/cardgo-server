@@ -2,7 +2,6 @@ package gameserver
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -51,10 +50,4 @@ func (a *Application) Stop(ctx context.Context) error {
 	}
 	ilog.Infof("application stopped node=%s", a.cfg.Server.NodeID)
 	return firstErr
-}
-
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }

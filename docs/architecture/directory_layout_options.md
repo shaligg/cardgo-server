@@ -86,6 +86,7 @@ gameserver 启动装配已从 internal/app 迁移到 internal/app/gameserver。
 bootstrap.go
 lifecycle.go
 config.go
+admin_http.go
 metrics_hooks.go
 state_restore.go
 ```
@@ -104,7 +105,7 @@ workshop_handler.go
 helpers.go
 ```
 
-后续如果管理接口继续增加，再评估是否从 `bootstrap.go` 拆出 `admin_http.go`。
+HTTP 管理入口已从 `bootstrap.go` 拆出到 `admin_http.go`，避免启动装配函数继续变长。
 
 ## 4. 目录职责原则
 
@@ -775,15 +776,15 @@ cmd/gameserver/main.go import internal/app/gameserver
 
 这一步会改 import 路径较多，但逻辑不应该变化。
 
-### 11.3 第三步：再评估是否拆 admin_http
+### 11.3 第三步：拆出 admin_http（已完成）
 
-如果管理接口继续增加，可以从 `bootstrap.go` 拆出：
+HTTP 管理接口已经从 `bootstrap.go` 拆出：
 
 ```text
 internal/app/gameserver/admin_http.go
 ```
 
-如果管理接口仍然很少，可以不拆。
+`bootstrap.go` 只保留 `buildAPIMux(...)` 调用，不直接展开 health、metrics、drain 和 session 路由细节。
 
 ## 12. 迁移风险
 

@@ -1116,6 +1116,7 @@ go_game_server/
 │   │       ├── bootstrap.go
 │   │       ├── lifecycle.go
 │   │       ├── config.go
+│   │       ├── admin_http.go
 │   │       ├── metrics_hooks.go
 │   │       └── state_restore.go
 │   ├── handler/                    # 游戏业务协议入口，不绑定 WS/TCP
