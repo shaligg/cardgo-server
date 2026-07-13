@@ -346,6 +346,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 11. DONE：将业务协议入口从 `internal/app` 迁移到 `internal/handler`，`app` 回归应用装配、生命周期和配置职责。
 12. DONE：将 gameserver 启动装配从 `internal/app` 迁移到 `internal/app/gameserver`，让应用层显式表达进程边界。
 13. DONE：拆出 `internal/app/gameserver/admin_http.go`，收敛 health、metrics、drain、sessions 和 login API 路由组装。
+14. DONE：删除 `internal/game/chat`、`internal/game/guild`、`internal/game/rank` 空壳，避免公共领域能力和本地玩法目录边界混淆；后续聊天、公会、排行入口以 `globalcore/*` 为准。
 
 目标：
 
