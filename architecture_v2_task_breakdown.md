@@ -19,7 +19,7 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 4. 单节点优先：先完成单进程承载 2000 在线目标，不提前拆微服务。
 5. 接口先行：登录模块与实时模块通过接口边界交互，后续可独立拆分。
 6. 一致性优先：先定义 A/B/C 数据分级与写入规则，再落代码。
-7. 全局域优先：`globalcore(Friend/Chat/Guild/Mail/Rank/Notice)` 先同进程收敛；`globalserver` 从 MVP 起建立代码边界，但初版不独立启动、不做网络传输层。
+7. 全局域优先：`globalcore(Friend/Chat/Guild/Mail/Rank/Notice)` 作为公共领域核心，同进程先落地；`globalserver` 从 MVP 起建立公共服/job 编排边界，但初版不独立启动、不做网络传输层。
 8. 迁移白名单：只有技术文档“可迁移模块列表”中的模块才按可远程化边界实现，列表外默认简单本地实现。
 9. 范围冻结：超出 MVP 的能力全部进入 backlog，不在当前迭代实现。
 
@@ -46,7 +46,7 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 3. 输出配置附录（本地/测试/生产最小配置集合）。
 4. 输出风险清单（容量、数据一致性、故障恢复）。
 5. 冻结数据分级清单（A/B/C）与幂等策略（`req_id` + 唯一键）。
-6. 冻结 `globalcore` 本地公共领域模块与 `globalserver` 独立公共服逻辑边界。
+6. 冻结 `globalcore` 公共领域核心与 `globalserver` 公共服/job 编排边界。
 7. 冻结事件可靠性方案（同进程重试队列 + DLQ，后续 Outbox + MQ 迁移）。
 8. 冻结 MVP 边界（本期实现项与延期项）并评审通过。
 
@@ -133,7 +133,7 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 4. 断线重连恢复与异步刷盘队列。
 5. 多路由键分片落地（player/guild/channel）。
 6. Redis 故障时的鉴权熔断与渐进恢复策略。
-7. globalcore 仅保留接口占位，不进入复杂业务实现；globalserver 建立结算/批处理代码边界，但不作为独立进程进入 MVP 主链路。
+7. globalcore 保留公共领域核心边界，承载接口、DTO、Local/Remote 适配和可复用规则；globalserver 建立结算/批处理编排边界，但不作为独立进程进入 MVP 主链路。
 
 ### 交付物
 1. 稳定性中间件能力
@@ -243,7 +243,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 
 1. 重构 `architecture_v2.md`，补齐卡牌、订单、工坊、经济模块映射。
 2. 对齐 `docs/design/mvp_scope.md` 中的 Prototype/MVP 范围。
-3. 确认 `globalcore` 只占位 Friend/Chat/Guild/Mail/Rank/Notice，`globalserver` 建立 MVP 代码边界，用于结算/批处理/未来独立公共服逻辑。
+3. 确认 `globalcore` 作为 Friend/Chat/Guild/Mail/Rank/Notice 公共领域核心，`globalserver` 建立 MVP 编排边界，用于结算/批处理/未来独立公共服逻辑。
 4. 冻结 MVP `op_code` 范围。
 
 验收：

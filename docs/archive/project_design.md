@@ -1,5 +1,8 @@
 # 项目设计文档
 
+> 历史归档：本文档为早期通用 WebSocket 服务方案，已不作为当前卡牌游戏后端架构依据。
+> 当前架构以根目录 `architecture_v2.md` 和 `backend_technical_architecture.md` 为准。
+
 ## 1. 项目概述
 
 ### 1.1 项目背景
