@@ -1136,8 +1136,6 @@ go_game_server/
 ├── cmd/
 │   └── gameserver/
 │       └── main.go
-│   └── globalserver/        # 后续独立公共服入口；MVP 不独立启动
-│       └── main.go
 ├── configs/
 │   ├── config.local.yaml
 │   ├── config.staging.yaml
@@ -1214,15 +1212,7 @@ go_game_server/
 │   │   ├── rank/
 │   │   └── notice/
 │   ├── globalserver/
-│   │   ├── README.md
-│   │   ├── rank/
-│   │   │   └── settlement.go
-│   │   ├── guild/
-│   │   │   └── settlement.go
-│   │   ├── mail/
-│   │   │   └── batch_sender.go
-│   │   └── activity/
-│   │       └── activity_a_rank_settlement.go
+│   │   └── contracts.go            # MVP 先落地公共服接口/DTO，不预创建空实现目录
 │   ├── repo/
 │   │   ├── model/
 │   │   │   ├── player.go
@@ -1274,6 +1264,12 @@ go_game_server/
 ├── backend_technical_architecture.md
 └── Makefile
 ```
+
+`globalserver` 当前落地规则：
+
+- MVP 只保留 `internal/globalserver/contracts.go`，承载排行榜结算、批量邮件、通用 Job 等公共服接口契约。
+- 不预创建 `rank/mail/activity` 空目录；当对应任务真正实现时，再按领域拆出 `globalserver/rank`、`globalserver/mail`、`globalserver/activity`。
+- 不创建 `cmd/globalserver`；只有需要独立公共服进程时，再新增启动入口和 transport adapter。
 
 目录分层规则：
 
