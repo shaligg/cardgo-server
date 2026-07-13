@@ -548,16 +548,24 @@ internal/
 
   globalcore/
     core.go
-    rank_service.go
-    chat_service.go
-    guild_service.go
-    world_service.go
+    rank/              # 公共领域核心：接口、DTO、Local/Remote 适配、排行规则
+      service.go
+      local.go
+      remote_client.go # 未来需要时再加
+      reward.go        # 排行奖励规则，供本地和远端复用
+    chat/              # 聊天公共领域核心
+    guild/             # 公会公共领域核心
+    mail/              # 邮件公共领域核心
+    friend/            # 好友公共领域核心
+    notice/            # 公告公共领域核心
 
   globalserver/
     rank/
-      service.go       # 未来需要时再加
-    settlement/
-      service.go       # 未来需要时再加
+      settlement_job.go # 公共服/job 编排：扫描、幂等、落库、重试
+    mail/
+      batch_job.go      # 批量邮件/补偿编排，未来需要时再加
+    activity/
+      settlement_job.go # 活动结算编排，未来需要时再加
 
   platform/
     login/

@@ -70,7 +70,7 @@
 4. 当前阶段不引入策划分服逻辑；只保留性能扩容能力。
 5. 好友/聊天/公会/邮件/排行完整业务后置，但 `globalcore/globalserver` 代码边界从 MVP 起建立。
 6. Demo 阶段优先“可用闭环”，生产增强项（复杂风控、跨地域容灾）后置。
-7. `globalcore` 以同进程本地公共领域模块存在；`globalserver` 在 MVP 就建立代码边界，但不独立启动、不做网络传输层。
+7. `globalcore` 以同进程公共领域核心存在；`globalserver` 在 MVP 就建立代码边界，但不独立启动、不做网络传输层。
 
 ## 4. 总体架构
 ```text
@@ -87,7 +87,7 @@ Client
       - session
       - dispatcher
       - game services(player/asset/card/deck/order/battle/workshop)
-      - globalcore(friend/chat/guild/mail/rank/notice local modules)
+      - globalcore(friend/chat/guild/mail/rank/notice domain core)
       - globalserver(same-process global jobs/service process boundary)
       - state manager
       - cached repository
@@ -117,7 +117,7 @@ Client
                                                 |        +--> [Workshop]
                                                 |        +--> [Economy config helpers]
                                                 |
-                                                +--> [globalcore: Friend/Chat/Guild/Mail/Rank/Notice local modules]
+                                                +--> [globalcore: Friend/Chat/Guild/Mail/Rank/Notice domain core]
                                                 +--> [globalserver: same-process global jobs/service process boundary]
                                                 |
                                                 +--> [State: memory + flush_queue] --> [Redis]
@@ -243,23 +243,25 @@ Client -> AccessGateway ==少量内网复用连接==> GameServer
 
 | 类型 | 说明 | 当前是否做 |
 |---|---|---|
-| `globalcore` 本地公共领域模块 | 代码边界独立，但仍在 GameServer 进程内执行，请求期可直接调用 | MVP 使用 |
-| `globalserver` 公共服逻辑模块 | 周期结算、批处理、跨服聚合、独立公共服进程入口逻辑 | MVP 写代码边界，同进程直调 |
+| `globalcore` 公共领域核心 | 跨玩家公共领域的接口、DTO、核心规则、Local 实现和 RemoteClient；可被 GameServer 与 GlobalServer 复用 | MVP 使用 |
+| `globalserver` 公共服编排模块 | 周期结算、批处理、跨服聚合、独立公共服进程入口与 Job 编排 | MVP 写代码边界，同进程直调 |
 
 `globalcore` 规则：
 
-- 当前部署：同 GameServer 进程内执行。
-- 当前边界：`interface + local adapter`。
+- 定位：公共领域核心，不等同于 GameServer 专用 client。
+- 内容：接口、DTO、幂等键规则、公共领域纯规则、Local 实现、RemoteClient。
 - 适合：请求期公共数据读写，例如提交排行榜分数、查询公会信息、发送频道消息。
-- 重要约束：`globalcore` 当前不是独立公共服务进程。
-- 演进：后续可把本地实现替换为 remote client。
+- 也适合：可被本地和远端共同复用的公共规则，例如排行奖励分段、奖励生成、聊天消息校验、公会权限规则。
+- 当前部署：MVP 与 GameServer 同进程；未来可被独立 GlobalServer 进程复用。
+- 演进：GameServer 侧可把 `LocalService` 替换为 `RemoteClient`，但 `globalcore` 中的接口、DTO 和核心规则保持稳定。
 
 `globalserver` 规则：
 
 - 当前部署：MVP 不独立启动，不提供 RPC/HTTP 等数据传输层。
-- 当前用途：从 MVP 开始建立代码边界，承载未来独立公共服进程或全局 job 的逻辑。
+- 当前用途：从 MVP 开始建立代码边界，承载未来独立公共服进程或全局 job 的编排逻辑。
 - 适合：排行榜赛季结算、公会赛季结算、批量邮件、跨服聚合、全局定时任务。
 - 调用方式：初版由 GameServer、管理入口或测试脚本同进程直接调用。
+- 实现方式：调用 `globalcore` 完成公共领域计算，自己负责 job 状态、幂等、重试、落库和批处理流程。
 - 演进：后续可增加 `cmd/globalserver` 或独立 job 入口，并补数据传输层。
 
 示例：
@@ -276,15 +278,18 @@ MVP:
 
 排行榜赛季结算:
   globalserver/rank.SettleSeason()
+    -> globalcore/rank.CalcSeasonRewards()
+    -> game/asset.RewardService.ApplyRewardInTx()
 ```
 
 判断规则：
 
-1. 玩家请求链路内可完成的公共数据操作，放 `globalcore`。
+1. 公共领域接口、DTO、Local/Remote 适配和可复用公共规则，放 `globalcore`。
 2. 周期结算、批处理、跨服聚合、公共服进程入口逻辑，放 `globalserver`。
 3. 需要跨多个 GameServer 实时统一状态时，`globalcore` 可替换为 remote client。
 4. game 模块不直接操作 globalcore 的内部 DB 表、Redis key、ZSET 或内存结构。
 5. GameServer 主链路不依赖独立 `globalserver` 进程启动；MVP 可同进程调用其代码。
+6. 发奖执行仍通过 `game/asset` 的接口完成，`globalcore/globalserver` 不直接改玩家资产表和在线内存。
 
 ### 5.5.2 可迁移代码边界与反过度拆分原则
 不是所有业务都需要按远程服务形态设计。MVP 的目标是快速形成可运行 Demo，同时保留未来必要的拆分空间。
@@ -305,12 +310,12 @@ MVP:
 | 模块 | 当前位置 | 未来可能位置 | 实现要求 | MVP 要求 |
 |---|---|---|---|---|
 | `login` | `internal/platform/login` | 独立 LoginServer | 接口化，ticket/allocator DTO 稳定 | 当前同进程 HTTP |
-| `globalcore/rank` | GameServer 同进程 | `globalserver/rank` 或独立 RankService | `RankService` 接口，支持 `LocalRankService` 与 `RemoteRankClient` | 可先本地实现 |
-| `globalcore/mail` | GameServer 同进程 | `globalserver/mail` 或独立 MailService | 接口化，发放/领取幂等，附件持久化 | 可先占位或简化 |
-| `globalcore/chat` | GameServer 同进程 | `globalserver/chat` 或独立 ChatService | 接口化，不依赖本机连接对象，消息可持久化或短期缓存 | MVP 可只占位 |
-| `globalcore/guild` | GameServer 同进程 | `globalserver/guild` 或独立 GuildService | 接口化，公会数据以 DB/Redis 为权威 | MVP 可只占位 |
-| `globalcore/friend` | GameServer 同进程 | `globalserver/friend` 或独立 FriendService | 接口化，关系链持久化 | MVP 可只占位 |
-| `globalcore/notice` | GameServer 同进程 | `globalserver/notice` 或独立 NoticeService | 接口化，公告配置/有效期持久化 | MVP 可只占位 |
+| `globalcore/rank` | GameServer 同进程 | 独立 RankService 或 GlobalServer 复用 | `RankService` 接口，支持 `LocalRankService` 与 `RemoteRankClient`；排行奖励规则也放这里复用 | 可先本地实现 |
+| `globalcore/mail` | GameServer 同进程 | 独立 MailService 或 GlobalServer 复用 | 接口化，发放/领取幂等，附件持久化，批量邮件规则可复用 | 可先占位或简化 |
+| `globalcore/chat` | GameServer 同进程 | 独立 ChatService 或 GlobalServer 复用 | 接口化，不依赖本机连接对象，消息可持久化或短期缓存 | MVP 可只占位 |
+| `globalcore/guild` | GameServer 同进程 | 独立 GuildService 或 GlobalServer 复用 | 接口化，公会数据以 DB/Redis 为权威，公会权限规则可复用 | MVP 可只占位 |
+| `globalcore/friend` | GameServer 同进程 | 独立 FriendService 或 GlobalServer 复用 | 接口化，关系链持久化 | MVP 可只占位 |
+| `globalcore/notice` | GameServer 同进程 | 独立 NoticeService 或 GlobalServer 复用 | 接口化，公告配置/有效期持久化 | MVP 可只占位 |
 | `globalserver/rank` | 同进程 job 代码 | 独立 GlobalServer job | 无 GameServer 私有状态依赖，结算幂等 | 写代码边界 |
 | `globalserver/mail` | 同进程 job 代码 | 独立 GlobalServer job | 批量发放幂等，可失败重试 | 写代码边界 |
 | `globalserver/activity` | 同进程 job 代码 | 独立 GlobalServer job | 活动结算输入显式化，输出持久化 | 按需骨架 |
@@ -320,8 +325,10 @@ MVP:
 说明：
 
 - `battle/worker` 只代表“无状态战斗计算”候选，不包含局内连接、回合状态、推送逻辑。
-- `globalcore/*` 的本地实现必须按未来 remote implementation 的约束编写，不能拿 `session`、`conn`、`OnlineState`。
+- `globalcore/*` 的接口、DTO 和核心规则必须按本地/远端复用约束编写，不能拿 `session`、`conn`、`OnlineState`。
 - `RemoteClient` 不需要在 MVP 立即实现，但接口、DTO、幂等规则要从一开始稳定。
+- `LocalService` 和 `RemoteClient` 只能代表调用方式差异，不能各自复制一份业务规则。
+- 排行发奖、邮件附件生成、公会赛季奖励等公共规则应沉到 `globalcore/*`，由 `globalserver/*` 编排调用。
 - 列表外模块如果只有一个本地调用方、一个本地实现，先不抽远程接口。
 
 所有模块列表：
@@ -347,12 +354,12 @@ MVP:
 | `battle/worker` | 无状态战斗计算 | 迁移白名单 |
 | `game/workshop` | 工坊系统 | 本地 |
 | `game/economy` | 经济配置与公式 | 本地 |
-| `globalcore/rank` | 排行榜请求期能力 | 迁移白名单 |
-| `globalcore/mail` | 邮件请求期能力 | 迁移白名单 |
-| `globalcore/chat` | 聊天请求期能力 | 迁移白名单 |
-| `globalcore/guild` | 公会请求期能力 | 迁移白名单 |
-| `globalcore/friend` | 好友请求期能力 | 迁移白名单 |
-| `globalcore/notice` | 公告请求期能力 | 迁移白名单 |
+| `globalcore/rank` | 排行榜接口、Local/Remote 适配、排行核心规则 | 迁移白名单 |
+| `globalcore/mail` | 邮件接口、Local/Remote 适配、附件/领取核心规则 | 迁移白名单 |
+| `globalcore/chat` | 聊天接口、Local/Remote 适配、消息核心规则 | 迁移白名单 |
+| `globalcore/guild` | 公会接口、Local/Remote 适配、公会核心规则 | 迁移白名单 |
+| `globalcore/friend` | 好友接口、Local/Remote 适配、关系链核心规则 | 迁移白名单 |
+| `globalcore/notice` | 公告接口、Local/Remote 适配、公告核心规则 | 迁移白名单 |
 | `globalserver/rank` | 排行榜结算/Job | 迁移白名单 |
 | `globalserver/mail` | 批量邮件/补偿 | 迁移白名单 |
 | `globalserver/activity` | 活动结算/Job | 迁移白名单 |
@@ -367,7 +374,8 @@ MVP:
 | 类型 | 示例 | 实现要求 |
 |---|---|---|
 | 跨玩家公共数据 | 排行榜、邮件、公会、好友、聊天、公告 | 通过 `globalcore` 接口访问，内部可先本地实现 |
-| 周期结算/批处理 | 排行榜赛季结算、批量邮件、活动结算 | 放 `globalserver` 代码边界，MVP 同进程调用 |
+| 公共领域核心规则 | 排行奖励分段、邮件附件标准化、公会权限规则 | 放 `globalcore`，本地和未来远端共同复用 |
+| 周期结算/批处理 | 排行榜赛季结算、批量邮件、活动结算 | 放 `globalserver` 编排，MVP 同进程调用 |
 | 需要独立扩容 | 高频聊天、热点排行榜、大规模公会活动 | 预留 remote client 替换点 |
 | 需要独立 SLA | 邮件补偿、排行榜发奖、全局活动结算 | 必须有幂等键、任务状态、失败重试 |
 | 多 GameServer 共享状态 | 跨服榜、世界频道、全局公告 | 不能依赖本机内存，必须以 DB/Redis 为权威或共享介质 |
@@ -387,6 +395,7 @@ MVP:
 - “本地”不代表永远不能调整，而是当前实现不要预先做远程化结构。
 - `game/asset` 可暴露接口给 `globalserver` 发奖使用，但它本身仍是 GameServer 主业务模块。
 - `repo/cache/infra/gamedata` 属于可复用基础代码，不归类为可迁移业务模块。
+- `globalcore` 可以被 `game/*`、`globalserver/*` 和未来独立公共服共同引用；但不能反向依赖 `handler`、`gateway/ws`、`session`、`state.OnlineState`。
 
 实现原则：
 
@@ -395,6 +404,7 @@ MVP:
 - 接口边界服务于未来拆分和测试，不作为所有业务代码的默认模板。
 - 先用简单结构实现 MVP，只有出现明确边界、共享状态、扩容或 SLA 诉求时再升级抽象。
 - 如果一个抽象目前只有一个调用方、一个实现、没有迁移计划，可以先不抽。
+- 可复用公共规则优先放 `globalcore/<domain>`；运行时调度、定时任务、批量扫描、失败重试放 `globalserver/<domain>`。
 
 示例：
 
@@ -484,7 +494,27 @@ MVP:
     -> RankSettlementJob.SettleSeason()
 ```
 
-### 5.5.4 MVP 业务子模块
+### 5.5.4 公共域开发检查清单
+新增涉及公共域的功能时，先按下面规则归类：
+
+| 问题 | 放置位置 |
+|---|---|
+| 这是某个玩法自己的规则吗，例如摇骰子如何得分、关卡如何结算？ | `game/<feature>` |
+| 这是公共领域接口、DTO、Local/Remote 适配或可复用规则吗？ | `globalcore/<domain>` |
+| 这是周期任务、批量扫描、赛季结算、失败重试或跨服聚合编排吗？ | `globalserver/<domain>` |
+| 这是统一发奖、扣费、流水和资产幂等吗？ | `game/asset` 接口 |
+| 这是 DB 表读写、唯一键、事务内 CRUD 吗？ | `repo` |
+
+强制要求：
+
+1. `globalcore` 不能 import `handler`、`gateway/ws`、`session`、`state.OnlineState`。
+2. `globalserver` 不能读取 GameServer 私有内存，输入必须来自显式参数、DB 或 Redis。
+3. `LocalService` 与 `RemoteClient` 不允许复制两套业务规则；公共规则必须沉到 `globalcore`。
+4. 排行榜发奖这类公共规则放 `globalcore/rank`；排行榜赛季扫描、任务状态、重试和落库编排放 `globalserver/rank`。
+5. 发奖执行统一走 `game/asset` 接口，公共域模块不得直接修改玩家资产表或在线热状态。
+6. 如果某模块不在迁移白名单，默认按本地简单实现，不额外制造 remote/client/adapter。
+
+### 5.5.5 MVP 业务子模块
 | 模块 | 职责 | 数据写入要求 |
 |---|---|---|
 | `player` | 建号、基础资料、等级、章节进度 | A 类数据，事务写 |
@@ -1555,7 +1585,7 @@ type CostItem struct {
 4. 所有写接口必须携带 `reqID`。
 5. 上述结构体是接口契约示意，代码实现时可放入各模块自己的 DTO。
 
-### 18.6 globalcore（本地公共领域接口契约）
+### 18.6 globalcore（公共领域核心契约）
 ```go
 package globalcore
 

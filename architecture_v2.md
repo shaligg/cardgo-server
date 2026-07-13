@@ -70,7 +70,7 @@ GameServer 进程
   - Auth / Session
   - Dispatcher
   - Game Services
-  - globalcore local modules
+  - globalcore domain core
   - globalserver same-process jobs/service process boundary
   - State Manager
   - Repository / Cache
@@ -136,20 +136,22 @@ MVP 概述模块：
 
 | 类型 | 含义 | 当前部署 | 未来演进 |
 |---|---|---|---|
-| `globalcore` 本地公共领域模块 | 涉及公共数据或公共规则，但可以在 GameServer 请求链路内本地执行 | 同进程 | 保持模块化，必要时替换为远程 client |
-| `globalserver` 公共服逻辑模块 | 周期结算、批处理、跨服聚合、公共服进程入口逻辑 | MVP 写代码但同进程直调，无独立启动/无网络层 | 按压力点拆成独立进程或独立 job |
+| `globalcore` 公共领域核心 | 公共域接口、DTO、核心规则、Local 实现和 RemoteClient，可被 GameServer 与 GlobalServer 复用 | 同进程 | 保持模块化，必要时替换为远程 client 或被独立公共服复用 |
+| `globalserver` 公共服编排模块 | 周期结算、批处理、跨服聚合、公共服进程入口和 Job 编排 | MVP 写代码但同进程直调，无独立启动/无网络层 | 按压力点拆成独立进程或独立 job |
 
-MVP 先做第一种：`globalcore` 本地公共领域模块。
+MVP 主请求链路先做 `globalcore` 本地实现；`globalserver` 先建立最小代码边界，不独立启动。
 
 ```text
 globalcore/*
-  当前是 GameServer 内部模块
-  不是独立公共服进程
-  但接口按未来可远程化设计
+  公共领域核心
+  包含接口、DTO、核心规则、Local 实现、RemoteClient
+  当前与 GameServer 同进程
+  未来可被独立 GlobalServer 复用
 
 globalserver/*
-  MVP 就建立代码边界
-  表示未来独立公共服进程或全局 job 的代码边界
+  公共服/全局 job 编排层
+  调用 globalcore 完成领域计算
+  自己负责扫描、幂等、落库、重试、批处理
   初版不独立启动，不做数据传输层
   由 GameServer 或管理入口同进程直接调用
 ```
@@ -172,17 +174,19 @@ globalserver/*
 ```text
 game/* 不拥有好友、聊天、公会、邮件、排行榜的核心状态和核心规则。
 game/* 可以通过接口调用 globalcore/*。
-globalcore/* 当前只是本地公共领域模块，不等于独立公共服务进程。
-globalserver/* MVP 就可以有代码，但不独立启动、不做 RPC/HTTP 等数据传输层。
+globalcore/* 是公共领域核心，不等于独立公共服务进程，也不只是 client。
+globalserver/* 是公共服编排层，MVP 就可以有代码，但不独立启动、不做 RPC/HTTP 等数据传输层。
 ```
 
 判断规则：
 
-- 如果是玩家请求链路内的公共数据读写，先放 `globalcore/*` 本地模块。
-- 如果是全局周期结算、批量发奖、跨服聚合、赛季清算，放 `globalserver/*` 代码边界。
-- 如果 `globalcore/*` 的请求期逻辑未来需要跨多个 GameServer 实时统一状态、独立扩容、故障隔离或独立 SLA，再替换为远程调用。
+- 如果是玩家请求链路内的公共数据读写，先通过 `globalcore/*` 接口调用。
+- 如果是公共领域核心规则，例如排行奖励分段、奖励生成、聊天消息校验、公会权限规则，放 `globalcore/*`。
+- 如果是全局周期结算、批量发奖、跨服聚合、赛季清算，放 `globalserver/*` 编排。
+- 如果 `globalcore/*` 的请求期逻辑未来需要跨多个 GameServer 实时统一状态、独立扩容、故障隔离或独立 SLA，再将 Local 实现替换为 RemoteClient。
 - game 可以调用 globalcore 接口，但不能直接操作 globalcore 的内部表、map、Redis key 或 ZSET。
 - 初版 `globalserver/*` 由 GameServer 同进程直调；未来拆分时再补 `cmd/globalserver` 和传输层。
+- `globalserver/*` 可以复用 `globalcore/*` 规则和 `game/asset` 发奖接口，但不能依赖连接、session、在线热状态。
 - 只有需要或未来可能迁移的模块才按可远程化方式实现，不把所有本地业务强行套成 service/client/adapter。
 - 强依赖连接、在线内存、局内状态、单玩家高频轻逻辑的业务，优先保持 GameServer 本地内聚。
 - 可迁移模块以技术文档中的“可迁移模块列表”为准；列表外默认简单本地实现。
@@ -204,7 +208,7 @@ globalserver/* MVP 就可以有代码，但不独立启动、不做 RPC/HTTP 等
 活动 A 排行榜赛季结算与奖励发放：
   globalserver/rank 或 globalserver/activity_a
     -> 扫描榜单
-    -> 生成排名奖励
+    -> 调 globalcore/rank 生成排名奖励
     -> 调 AssetService/MailService 发奖或生成待领取记录
 ```
 
@@ -354,6 +358,10 @@ GameServer
   -> 调用本地 globalcore interface
   -> 将部分实现替换为 Remote Client
 
+GlobalServer
+  -> 复用 globalcore 领域规则
+  -> 执行结算、批处理、补偿和 job 编排
+
 可选独立进程：
   -> chat-service
   -> guild-service
@@ -368,6 +376,7 @@ GameServer
 - 可以先只把压力最大的模块远程化，例如 Chat 或 Rank。
 - Friend/Guild/Rank 在数据量不大时，可以长期保持本地模块 + DB/Redis 权威存储。
 - 非迁移候选模块不为了形式统一而过度拆分，避免产生大量只有一个实现、一个调用方的无用接口。
+- LocalService 和 RemoteClient 只代表调用方式差异，不允许各自复制一套公共业务规则。
 
 阶段 4：按压力点拆分
 
