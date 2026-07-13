@@ -9,6 +9,13 @@
 - `backend_technical_architecture.md`
 - `architecture_v2_task_breakdown.md`
 
+当前状态：历史评审材料。
+
+- 本文档中的目录树、示例文件名和迁移步骤只用于解释当时的决策过程。
+- 后续实现不得直接以本文档为准。
+- 当前目录、接口、协议、数据表和迁移白名单的唯一权威来源是根目录 `backend_technical_architecture.md`。
+- 如果本文档与权威技术文档冲突，以权威技术文档为准，不反向同步本文档中的旧细节。
+
 当前目标：
 
 1. 参考成熟游戏后端和 Go 项目实践。

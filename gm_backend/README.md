@@ -1,5 +1,8 @@
 # 游戏公司GM后台系统
 
+> 说明：本文档描述的是 `gm_backend/` 下的独立示例后台，不是当前卡牌游戏服主链路架构文档。
+> 当前游戏服后端架构、协议、目录、数据表和服务边界以根目录 `architecture_v2.md` 与 `backend_technical_architecture.md` 为准。
+
 基于Golang Gin框架开发的游戏公司GM后台系统，提供玩家管理、数据统计、系统设置等功能。
 
 ## 项目结构
