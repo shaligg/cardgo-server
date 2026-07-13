@@ -512,7 +512,9 @@ MVP:
 3. `LocalService` 与 `RemoteClient` 不允许复制两套业务规则；公共规则必须沉到 `globalcore`。
 4. 排行榜发奖这类公共规则放 `globalcore/rank`；排行榜赛季扫描、任务状态、重试和落库编排放 `globalserver/rank`。
 5. 发奖执行统一走 `game/asset` 接口，公共域模块不得直接修改玩家资产表或在线热状态。
-6. 如果某模块不在迁移白名单，默认按本地简单实现，不额外制造 remote/client/adapter。
+6. 可迁移接口的请求参数必须是 DTO 或基础类型，不能传 ORM 对象、连接对象、在线内存对象、事务外游离对象或模块内部结构体。
+7. DTO 字段必须显式表达业务含义、幂等键和版本信息，不能依赖调用方上下文隐式补齐。
+8. 如果某模块不在迁移白名单，默认按本地简单实现，不额外制造 remote/client/adapter。
 
 ### 5.5.5 MVP 业务子模块
 | 模块 | 职责 | 数据写入要求 |
@@ -1585,7 +1587,18 @@ type CostItem struct {
 4. 所有写接口必须携带 `reqID`。
 5. 上述结构体是接口契约示意，代码实现时可放入各模块自己的 DTO。
 
-### 18.6 globalcore（公共领域核心契约）
+### 18.6 可迁移接口 DTO 约束
+适用于 `globalcore`、`globalserver`、`RemoteClient`、未来独立服务 adapter 和 `battle/worker` 等可迁移边界。
+
+1. 请求参数必须使用 DTO 或基础类型，DTO 可放在当前领域包、`internal/contract` 或未来公共契约包。
+2. DTO 只描述数据，不携带方法依赖、连接句柄、ORM session、事务对象、锁、channel、context 外的运行时引用。
+3. DTO 不直接复用 GORM Model；Model 是 DB 映射，DTO 是接口契约，两者职责不同。
+4. DTO 必须包含远端执行所需的完整字段，例如 `uid`、`board_id`、`season_id`、`req_id`、`version`、`score`、`reward_items`。
+5. DTO 中的 `req_id`、`job_id`、`settlement_id` 等幂等字段必须由调用方显式传入，不能由被调方临时猜测。
+6. `LocalService` 和 `RemoteClient` 使用同一套 DTO，迁移时只替换实现，不改调用方参数语义。
+7. Handler 层的 WS `payload` DTO 可以和 Service DTO 分开；如果直接复用，必须确保不泄露传输层字段，例如 `op_code`、`session_id`、连接信息。
+
+### 18.7 globalcore（公共领域核心契约）
 ```go
 package globalcore
 
@@ -1660,7 +1673,7 @@ type NoticeItem struct {
 }
 ```
 
-### 18.7 globalserver（公共服逻辑接口契约）
+### 18.8 globalserver（公共服逻辑接口契约）
 `globalserver` 接口用于周期结算、批处理、补偿任务与未来独立公共服入口。MVP 阶段可以同进程调用这些接口，未来独立部署时在接口外层增加 transport adapter。
 
 ```go
