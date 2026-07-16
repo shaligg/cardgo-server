@@ -1,3 +1,8 @@
+// Package globalserver 定义公共服/job 编排层的最小接口契约。
+//
+// MVP 阶段这里不放具体结算实现，也不启动独立进程；GameServer 可以同进程调用这些接口。
+// 未来需要独立 GlobalServer 时，在这些接口外层增加 transport adapter，接口语义保持稳定。
+// 本包禁止依赖连接、session、在线热状态等 GameServer 私有运行时对象。
 package globalserver
 
 import "context"
