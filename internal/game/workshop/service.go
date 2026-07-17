@@ -95,7 +95,7 @@ type OfflineRewardClaimResult struct {
 
 // GetOverview 获取玩家工坊总览。
 //
-// 新玩家第一次请求时会创建默认 PlayerWorkshop；设施默认数据等待后续配置和升级任务接入。
+// 新玩家第一次请求时会创建默认 PlayerWorkshop；设施记录在玩家首次升级对应设施时创建。
 func (s Service) GetOverview(ctx context.Context, uid string) (Overview, error) {
 	if s.Repo == nil {
 		return Overview{}, fmt.Errorf("workshop repository is nil")

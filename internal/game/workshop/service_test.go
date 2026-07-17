@@ -70,7 +70,7 @@ func TestGetOverviewCreatesDefaultWorkshop(t *testing.T) {
 		t.Fatalf("last_offline_reward_at = %d, want positive unix timestamp", overview.Workshop.LastOfflineRewardAt)
 	}
 	if len(overview.Facilities) != 0 {
-		t.Fatalf("facilities = %+v, want empty before default facility config is implemented", overview.Facilities)
+		t.Fatalf("facilities = %+v, want empty before the player upgrades a facility", overview.Facilities)
 	}
 }
 
