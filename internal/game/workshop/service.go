@@ -43,7 +43,7 @@ type Service struct {
 
 // OfflineRewardPreview 是离线收益预览。
 //
-// B5.3 先返回空预览，真实收益计算在 claim_offline_reward 任务中实现。
+// 总览和领取使用同一套计算规则，避免客户端预览和实际发奖不一致。
 type OfflineRewardPreview struct {
 	OfflineSeconds int64 `json:"offline_seconds"`
 	Gold           int64 `json:"gold"`
