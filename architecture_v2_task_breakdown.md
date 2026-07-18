@@ -348,6 +348,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 13. DONE：拆出 `internal/app/gameserver/admin_http.go`，收敛 health、metrics、drain、sessions 和 login API 路由组装。
 14. DONE：删除 `internal/game/chat`、`internal/game/guild`、`internal/game/rank` 空壳，避免公共领域能力和本地玩法目录边界混淆；后续聊天、公会、排行入口以 `globalcore/*` 为准。
 15. DONE：新增 `internal/globalserver` 最小契约包，先落地排行榜结算、批量邮件和通用 Job 接口；MVP 同进程直调，未来独立公共服时在接口外层增加 transport adapter。
+16. DONE：补齐 `internal/globalcore` 的 Friend/Mail/Notice 接口契约，与技术文档中的公共领域核心清单对齐；只定义 DTO 和接口，不实现完整业务。
 
 目标：
 
