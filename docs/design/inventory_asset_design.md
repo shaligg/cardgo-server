@@ -168,7 +168,7 @@ configs/gamedata/items.json
 | `arena_field` | 存竞技场系统字段 |
 | `event_field` | 存活动系统字段 |
 
-`CostService/RewardService` 根据 `item_id` 查 `ItemConfig`，再决定实际写入位置。
+`AssetService` 根据 `item_id` 查 `ItemConfig`，再决定实际写入位置。
 
 ## 5. 普通道具
 
@@ -380,7 +380,7 @@ CostItem
 
 ```text
 业务模块
-  -> RewardService.Grant(req_id, uid, reward_list, reason)
+  -> AssetService.Grant(uid, reward_list, reason, req_id)
   -> 校验 req_id 是否已处理
   -> 开启事务
   -> 写入资产/道具/卡牌
@@ -395,7 +395,7 @@ CostItem
 玩法 Service
   -> 计算 reward_list
   -> TxManager.Do(tx)
-      -> RewardService.ApplyRewardInTx(tx, uid, reward_list, reason, req_id)
+      -> AssetService.ApplyRewardInTx(tx, uid, reward_list, reason, req_id)
          - 合并相同 item_id
          - 校验数量和道具配置
          - 写资产与流水
@@ -410,7 +410,7 @@ CostItem
 
 ```text
 业务模块
-  -> AssetService.Consume(req_id, uid, cost_list, reason)
+  -> AssetService.Consume(uid, cost_list, reason, req_id)
   -> 校验 req_id 是否已处理
   -> 开启事务
   -> 校验余额
@@ -427,7 +427,7 @@ CostItem
   -> 判断是否满足玩法条件
   -> 计算 cost_list
   -> TxManager.Do(tx)
-      -> CostService.ApplyCostInTx(tx, uid, cost_list, reason, req_id)
+      -> AssetService.ApplyCostInTx(tx, uid, cost_list, reason, req_id)
          - 合并相同 item_id
          - 校验数量和道具配置
          - 扣资产并写流水
@@ -446,7 +446,7 @@ BattleService.Settle
   -> 校验胜负和订单完成
   -> 计算奖励
   -> TxManager.Do(tx)
-      -> RewardService.ApplyRewardInTx(tx, reward_list)
+      -> AssetService.ApplyRewardInTx(tx, uid, reward_list, reason, req_id)
       -> Battle/Level Repository 写入关卡进度
       -> 写入幂等结果
   -> 返回结算结果
