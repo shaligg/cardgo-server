@@ -11,5 +11,4 @@ type Core struct {
 	Rank   RankService
 	Mail   MailService
 	Notice NoticeService
-	World  WorldService
 }
