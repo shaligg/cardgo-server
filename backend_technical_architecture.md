@@ -279,7 +279,7 @@ MVP:
 排行榜赛季结算:
   globalserver/rank.SettleSeason()
     -> globalcore/rank.CalcSeasonRewards()
-    -> game/asset.RewardService.ApplyRewardInTx()
+    -> game/asset.Service.ApplyRewardInTx()
 ```
 
 判断规则：
@@ -811,10 +811,10 @@ MVP: session_id == 当前连接 ID
 核心规则：
 
 1. 玩法 `Service` 决定“能不能执行、扣什么、发什么、更新什么玩法状态”。
-2. `CostService/RewardService` 只负责按 `cost_list/reward_list` 扣除或发放资产、写流水和保证幂等。
-3. `CostService/RewardService` 负责对同一批 `cost_list/reward_list` 做通用标准化，例如合并相同 `item_id`；这不属于玩法规则，不应散落在各玩法 `Service` 中。
+2. `AssetService` 只负责按 `cost_list/reward_list` 扣除或发放资产、写流水和保证幂等。
+3. `AssetService` 负责对同一批 `cost_list/reward_list` 做通用标准化，例如合并相同 `item_id`；这不属于玩法规则，不应散落在各玩法 `Service` 中。
 4. 事务边界由玩法 `Service` 或事务管理器建立；`Repository` 不调用发奖逻辑，不编排跨领域业务。
-5. `CostService/RewardService` 必须提供事务内入口，例如 `ApplyCostInTx`、`ApplyRewardInTx`，用于和玩法状态更新放进同一事务。
+5. `AssetService` 必须提供事务内入口，例如 `ApplyCostInTx`、`ApplyRewardInTx`，用于和玩法状态更新放进同一事务。
 6. 独立补偿、GM 补发、邮件附件等不需要绑定玩法状态的场景，可以使用自带事务的 `Grant/Consume` 便捷入口。
 7. `RewardItem` / `CostItem` 统一使用 `item_id + count`，不让业务方直接关心落库位置。
 8. `ItemConfig` 是策划静态配置，策划源使用 Excel，程序运行配置使用导出的 JSON，服务端启动时加载到内存。
@@ -1583,9 +1583,9 @@ type CostItem struct {
 
 说明：
 
-1. `CostService/RewardService` 是资源扣除和发放的统一执行入口。
-2. `LevelService.SettleLevel` 生成 `RewardItem`，在结算事务内调用 `RewardService.ApplyRewardInTx`，并同时写关卡进度。
-3. `WorkshopService.UpgradeFacility` 生成 `CostItem`，在升级事务内调用 `CostService.ApplyCostInTx`，并同时写设施等级。
+1. `AssetService` 是资源扣除和发放的统一执行入口。
+2. `LevelService.SettleLevel` 生成 `RewardItem`，在结算事务内调用 `AssetService.ApplyRewardInTx`，并同时写关卡进度。
+3. `WorkshopService.UpgradeFacility` 生成 `CostItem`，在升级事务内调用 `AssetService.ApplyCostInTx`，并同时写设施等级。
 4. 所有写接口必须携带 `reqID`。
 5. 上述结构体是接口契约示意，代码实现时可放入各模块自己的 DTO。
 
@@ -2321,7 +2321,7 @@ sequenceDiagram
 
 1. 局内状态在 `BattleState(L1)`，不每步写 DB。
 2. 结算是 A 类写，必须事务 + 幂等。
-3. 结算奖励由 `LevelService` 在事务内调用 `RewardService.ApplyRewardInTx`。
+3. 结算奖励由 `LevelService` 在事务内调用 `AssetService.ApplyRewardInTx`。
 4. 同一个 `session_id + req_id` 重试必须返回同一结算结果。
 5. 如果结算已成功，客户端重复请求不得再次发奖。
 
@@ -2356,7 +2356,7 @@ sequenceDiagram
 关键规则：
 
 1. 扣资源和设施升级必须在同一事务中。
-2. 工坊升级由 `WorkshopService` 编排事务，事务内通过 `CostService.ApplyCostInTx` 扣资源。
+2. 工坊升级由 `WorkshopService` 编排事务，事务内通过 `AssetService.ApplyCostInTx` 扣资源。
 3. 升级成功后刷新 `WorkshopEffects` 缓存。
 4. `req_id` 重试不得重复扣费。
 
