@@ -202,7 +202,7 @@ globalserver/* 是公共服编排层，MVP 就可以有代码，但不独立启�
 ```text
 活动 A 玩家完成一局并提交排行榜分数：
   game/activity_a
-    -> globalcore/rank.SubmitScore(board_id, uid, score, req_id)
+    -> globalcore/rank.UpdateScore(board_id, uid, score, req_id)
     -> globalcore/rank 内部可以本地执行 Redis ZADD / DB 记录
 
 活动 A 排行榜赛季结算与奖励发放：

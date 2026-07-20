@@ -268,7 +268,7 @@ Client -> AccessGateway ==少量内网复用连接==> GameServer
 
 ```text
 game/battle
-  -> rank.SubmitScore()
+  -> rank.UpdateScore()
 
 MVP:
   rank = globalcore/rank.LocalRankModule(redis/db)
