@@ -1205,12 +1205,12 @@ go_game_server/
 │   │   └── economy/
 │   ├── globalcore/
 │   │   ├── core.go
-│   │   ├── friend/
-│   │   ├── chat/
-│   │   ├── guild/
-│   │   ├── mail/
-│   │   ├── rank/
-│   │   └── notice/
+│   │   ├── friend_service.go
+│   │   ├── chat_service.go
+│   │   ├── guild_service.go
+│   │   ├── mail_service.go
+│   │   ├── rank_service.go
+│   │   └── notice_service.go
 │   ├── globalserver/
 │   │   └── contracts.go            # MVP 先落地公共服接口/DTO，不预创建空实现目录
 │   ├── repo/
@@ -1264,6 +1264,12 @@ go_game_server/
 ├── backend_technical_architecture.md
 └── Makefile
 ```
+
+`globalcore` 当前落地规则：
+
+- MVP 只保留 `internal/globalcore/*_service.go` 和 `core.go`，承载 Friend/Chat/Guild/Mail/Rank/Notice 的接口与 DTO。
+- 不预创建 `friend/chat/guild/mail/rank/notice` 空目录；当某个公共领域真正实现 LocalService、RemoteClient 或可复用规则时，再按领域拆子目录。
+- 公告统一使用 `NoticeService`，不再保留旧 `WorldService` 命名。
 
 `globalserver` 当前落地规则：
 
