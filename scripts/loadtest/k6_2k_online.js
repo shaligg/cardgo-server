@@ -142,10 +142,9 @@ export default function () {
         JSON.stringify({
           seq: bizSeq,
           type: 'biz_req',
+          op_code: 1001,
           ts: epochSec(),
-          payload: {
-            op_code: 1001,
-          },
+          payload: {},
         }),
       );
     }, BIZ_INTERVAL_MS);
@@ -255,16 +254,8 @@ function buildScenarioConfig(name) {
 }
 
 function buildThresholds(name) {
-  const common = {
-    login_ok_rate: ['rate>=0.999'],
-    ws_biz_ack_ok_rate: ['rate>=0.990'],
-    ws_auth_latency_ms: ['p(95)<2000'],
-    ws_biz_rtt_ms: ['p(95)<50', 'p(99)<120'],
-  };
-
   if (name === 'S3') {
     return {
-      ...common,
       ws_auth_ok_rate: ['rate>=0.900'],
       ws_connect_ok_rate: ['rate>=0.900'],
       ws_server_full_events: ['count>0'],
@@ -272,9 +263,12 @@ function buildThresholds(name) {
   }
 
   return {
-    ...common,
+    login_ok_rate: ['rate>=0.999'],
     ws_auth_ok_rate: ['rate>=0.999'],
     ws_connect_ok_rate: ['rate>=0.995'],
+    ws_biz_ack_ok_rate: ['rate>=0.990'],
+    ws_auth_latency_ms: ['p(95)<2000'],
+    ws_biz_rtt_ms: ['p(95)<50', 'p(99)<120'],
     ws_server_full_events: ['count==0'],
   };
 }

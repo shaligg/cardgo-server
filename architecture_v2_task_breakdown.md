@@ -160,7 +160,7 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 4. DONE：`scripts/loadtest/k6_report` 已实现 k6 summary 自动汇总与 Gate 判定报告输出。
 5. DONE：已完成缩时压测与结果汇总，报告见 `reports/loadtest_report_20260324_short.md`。
 6. DONE：修正压测脚本尾部采样偏差（`BIZ_STOP_BEFORE_CLOSE_MS` 默认 15000ms），S1 回归门槛通过。
-7. TODO：在独立压测机执行正式时长（S1 10m / S2 30m / S3 10m）并回填最终验收结论。
+7. TODO：在独立压测机按 `docs/ops/runbook.md` 默认 stages 执行 S1/S2/S3，并回填最终验收结论。
 
 ### 交付物
 1. 监控看板
@@ -226,10 +226,11 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 4. 风险：压测结果不达标。
 - 缓解：按 P3/P4 回流迭代，先瓶颈定位再优化。
 
-## 7. 近期执行建议（本周）
-1. 完成 P0（文档冻结）
-2. 并行启动 P1（工程骨架）
-3. 准备 P2 的协议代码骨架与测试样例
+## 7. 当前后续任务（2026-08-11）
+1. DONE：P0-P4 与卡牌 MVP B0-B7 的本地设计、实现、集成验收和旧代码清理已经完成。
+2. TODO：在独立压测机按 `docs/ops/runbook.md` 默认 stages 执行 P5 正式压测，回填最终容量结论。
+3. TODO：在预发环境执行 P6 灰度发布和故障注入演练，补充演练记录。
+4. P5/P6 得出结论前，不继续增加架构层或预留模块；发现瓶颈后按 P3/P4 回流做针对性修复。
 
 ## 8. 卡牌 MVP 后续任务拆分
 
@@ -421,3 +422,32 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
   -> 升级工坊
   -> 重新登录后数据存在
 ```
+
+### 8.8 B7 历史原型目录清理
+当前进度：DONE（2026-08-11）。早期原型已迁移到同级历史项目 `../go_orm_1_history`，当前项目不再保留旧运行链路和重复启动入口。
+
+目标：
+
+- 移除会干扰阅读和 IDE 跳转的历史原型代码。
+- 保证新增功能只沿 `cmd/gameserver` 与 `internal/*` 当前架构入口实现。
+
+迁移结果：
+
+| 原目录 | 当前判断 | 处理结果 |
+|---|---|---|
+| 根目录 `main.go` | 与 `cmd/gameserver/main.go` 完全相同的重复入口 | 已删除，历史项目保留同内容参考源码 |
+| `ws/` | 早期 WS 原型，当前入口已迁移到 `internal/framework/gateway/ws` | 已迁移到历史项目 |
+| `session/` | 早期 session 原型，当前入口已迁移到 `internal/platform/session` | 已迁移到历史项目 |
+| `db/` | 早期 DB 初始化原型，当前入口已迁移到 `internal/infra/db` | 已迁移到历史项目 |
+| `redis/` | 早期 Redis 原型，当前入口已迁移到 `internal/infra/redis` | 已迁移到历史项目 |
+| `config/` | 早期配置原型，当前配置由 `internal/app/gameserver` 和 `configs/` 承载 | 已迁移到历史项目 |
+| `example/` | 重复 GameServer 启动入口，不属于正式入口 | 已作为只读源码参考迁移 |
+| `test/` | 早期手写实验入口，不属于当前 Go 测试结构 | 已迁移到历史项目 |
+| `gm_backend/` | 使用模拟数据的独立 GM 示例，没有接入当前业务和数据库 | 已迁移到历史项目并保留独立 module |
+
+验收：
+
+- DONE：`go list ./...` 不再出现根目录旧原型包。
+- DONE：`go test ./...` 只覆盖当前架构代码和 loadtest 工具。
+- DONE：历史项目根 module 与其 `gm_backend` 独立 module 均可通过 `go test ./...`。
+- DONE：技术文档不再把旧目录作为当前可用入口。

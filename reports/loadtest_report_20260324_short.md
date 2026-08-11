@@ -2,7 +2,7 @@
 
 ## 1. Metadata
 - Date: 2026-03-24
-- Mode: short-duration validation (not full 10/30/10 minute acceptance)
+- Mode: short-duration validation (not the full default stages defined in `docs/ops/runbook.md`)
 - Server: `GAME_CONFIG=configs/config.local.yaml go run ./cmd/gameserver`
 - Script: `scripts/loadtest/k6_2k_online.js`
 - Summary parser: `scripts/loadtest/k6_report`

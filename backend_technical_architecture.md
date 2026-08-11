@@ -1131,6 +1131,21 @@ MVP 至少需要以下业务表：
 - 节点维护时支持 drain
 
 ## 16. 目录结构（落地建议）
+本文档中的 `cmd/`、`configs/`、`internal/`、`scripts/`、`docs/` 是当前后端 MVP 的权威目录口径。
+
+重复的根目录 `main.go` 以及早期原型目录 `ws/`、`session/`、`db/`、`redis/`、`config/`、`example/`、`test/`、`gm_backend/` 已于 2026-08-11 清理；历史源码迁移到同级项目 `../go_orm_1_history`，不再属于当前项目代码。
+
+当前项目新增功能必须遵守以下入口：
+
+- 新的 GameServer 入口只放在 `cmd/gameserver`。
+- 新的 WS/TCP/KCP 接入只放在 `internal/framework/gateway/*`。
+- 新的登录、验票、会话、在线状态只放在 `internal/platform/*`。
+- 新的 DB、Redis、缓存、日志、监控封装只放在 `internal/infra/*`。
+- 新的玩家请求协议只放在 `internal/handler` 和 `internal/contract/protocol`。
+- 新的玩法业务只放在 `internal/game/*`、`internal/globalcore/*` 或 `internal/globalserver/*`。
+
+历史项目只用于查看架构演进，不作为新功能依赖，也不得通过相对路径重新引用回当前项目。
+
 ```text
 go_game_server/
 ├── cmd/

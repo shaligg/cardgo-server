@@ -18,6 +18,16 @@
 - Local API endpoint reachable: `http://127.0.0.1:8080`
 - WS endpoint reachable: `ws://127.0.0.1:8081/ws`
 
+默认正式阶段以本表和 `scripts/loadtest/k6_2k_online.js` 为唯一口径：
+
+| Scenario | Target | Ramp Up | Hold | Ramp Down | Total |
+|---|---:|---:|---:|---:|---:|
+| S1 | 200 | 2m | 8m | 1m | 11m |
+| S2 | 2000 | 5m | 30m | 2m | 37m |
+| S3 | 2200 | 10m | 1m | 1m | 12m |
+
+任务文档中提到的“正式时长”均指以上完整 stages，不再单独维护一组简写时间。
+
 ### 3.2 Prepare Output Directory
 - `mkdir -p reports`
 
