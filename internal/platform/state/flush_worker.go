@@ -21,24 +21,37 @@ type FlushObserver interface {
 	OnDropped()
 }
 
+// OwnerReconciler 校验本机玩家运行时是否仍归属于当前 GameServer。
+type OwnerReconciler interface {
+	ReconcileOwners(ctx context.Context)
+}
+
 type FlushWorkerOptions struct {
-	BatchSize int
-	Interval  time.Duration
-	MaxRetry  int
-	Observer  FlushObserver
+	BatchSize          int
+	Interval           time.Duration
+	MaxRetry           int
+	CleanupInterval    time.Duration
+	OwnerCheckInterval time.Duration
+	OwnerReconciler    OwnerReconciler
+	Observer           FlushObserver
 }
 
 type FlushWorker struct {
-	queue     FlushQueue
-	online    *OnlineState
-	store     SnapshotStore
-	batchSize int
-	interval  time.Duration
-	maxRetry  int
-	observer  FlushObserver
-	stopOnce  sync.Once
-	stopCh    chan struct{}
-	doneCh    chan struct{}
+	queue              FlushQueue
+	online             *OnlineState
+	store              SnapshotStore
+	batchSize          int
+	interval           time.Duration
+	maxRetry           int
+	observer           FlushObserver
+	cleanupInterval    time.Duration
+	lastCleanup        time.Time
+	ownerCheckInterval time.Duration
+	lastOwnerCheck     time.Time
+	ownerReconciler    OwnerReconciler
+	stopOnce           sync.Once
+	stopCh             chan struct{}
+	doneCh             chan struct{}
 }
 
 func NewFlushWorker(queue FlushQueue, online *OnlineState, store SnapshotStore, opts FlushWorkerOptions) *FlushWorker {
@@ -51,16 +64,25 @@ func NewFlushWorker(queue FlushQueue, online *OnlineState, store SnapshotStore, 
 	if opts.MaxRetry < 0 {
 		opts.MaxRetry = 0
 	}
+	if opts.CleanupInterval <= 0 {
+		opts.CleanupInterval = time.Minute
+	}
+	if opts.OwnerCheckInterval <= 0 {
+		opts.OwnerCheckInterval = 5 * time.Second
+	}
 	return &FlushWorker{
-		queue:     queue,
-		online:    online,
-		store:     store,
-		batchSize: opts.BatchSize,
-		interval:  opts.Interval,
-		maxRetry:  opts.MaxRetry,
-		observer:  opts.Observer,
-		stopCh:    make(chan struct{}),
-		doneCh:    make(chan struct{}),
+		queue:              queue,
+		online:             online,
+		store:              store,
+		batchSize:          opts.BatchSize,
+		interval:           opts.Interval,
+		maxRetry:           opts.MaxRetry,
+		observer:           opts.Observer,
+		cleanupInterval:    opts.CleanupInterval,
+		ownerCheckInterval: opts.OwnerCheckInterval,
+		ownerReconciler:    opts.OwnerReconciler,
+		stopCh:             make(chan struct{}),
+		doneCh:             make(chan struct{}),
 	}
 }
 
@@ -72,7 +94,6 @@ func (w *FlushWorker) Start() {
 		for {
 			select {
 			case <-w.stopCh:
-				w.process(context.Background())
 				return
 			case <-ticker.C:
 				w.process(context.Background())
@@ -88,13 +109,24 @@ func (w *FlushWorker) Stop(ctx context.Context) error {
 
 	select {
 	case <-w.doneCh:
-		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+
+	// 定时循环退出后由当前 goroutine 独占消费队列，直到全部持久化或超时。
+	for w.queue != nil && w.queue.Len() > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		w.process(ctx)
+	}
+	w.observeQueueLen()
+	return nil
 }
 
 func (w *FlushWorker) process(ctx context.Context) {
+	w.reconcileOwners(ctx, time.Now())
+	w.cleanupExpiredStates(time.Now())
 	if w.queue == nil || w.online == nil || w.store == nil {
 		return
 	}
@@ -138,6 +170,22 @@ func (w *FlushWorker) process(ctx context.Context) {
 		}
 		w.observeSaved()
 	}
+}
+
+func (w *FlushWorker) reconcileOwners(ctx context.Context, now time.Time) {
+	if w.ownerReconciler == nil || (!w.lastOwnerCheck.IsZero() && now.Sub(w.lastOwnerCheck) < w.ownerCheckInterval) {
+		return
+	}
+	w.ownerReconciler.ReconcileOwners(ctx)
+	w.lastOwnerCheck = now
+}
+
+func (w *FlushWorker) cleanupExpiredStates(now time.Time) {
+	if w.online == nil || (!w.lastCleanup.IsZero() && now.Sub(w.lastCleanup) < w.cleanupInterval) {
+		return
+	}
+	w.online.DeleteExpired(now)
+	w.lastCleanup = now
 }
 
 func (w *FlushWorker) retryOrDrop(ctx context.Context, task FlushTask) {

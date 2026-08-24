@@ -54,6 +54,7 @@
 
 - 先用 1 个游戏服进程承载单服 2000 在线。
 - 登录模块当前同进程实现，但接口按独立登录服务设计。
+- 一旦扩展为多个 GameServer，先把 Login 拆成单独进程；不采用“每个 GameServer 都内置一个 Login”的部署方式。
 - 业务模块按服务边界写，后续可平滑拆分。
 - 高频在线热状态可以在本机内存。
 - 玩家权威数据必须在 DB。
@@ -299,10 +300,11 @@ GameServer 只做：
 重连规则：
 
 - 优先分配回原 GameServer。
-- 如果原服健康、未满、非 drain，可恢复本机内存热状态。
-- 如果分配到新 GameServer，不恢复旧服内存，只从 DB 重建玩家长期状态。
-- 原 GameServer 的旧内存态 MVP 使用 TTL 清理。
-- 后续可加迁移通知，让旧 GameServer 立即清理状态。
+- Login 从 Redis 玩家归属读取最近节点，但不在签发 ticket 时改写归属。
+- GameServer 验票并绑定会话成功后，才原子更新 Redis `uid -> server_id + conn_id`。
+- 如果 Redis 前一归属仍是本节点，可恢复本机内存热状态；否则不复用旧状态，只从 DB 重建长期数据。
+- 原 GameServer 复用现有状态维护循环，每 `5` 秒批量核对归属并清理已迁移玩家的 `OnlineState/BattleSession`。
+- 离线状态和归属保留 `120` 秒作为原节点重连窗口与异常兜底，不使用节点间迁移通知。
 
 详细流程见：
 
@@ -346,7 +348,8 @@ MVP 第一条主链路：
 阶段 2：多 GameServer
 
 ```text
-Login/Allocator 分配玩家到不同 GameServer
+独立单实例 LoginServer/Allocator
+  -> 分配玩家到多个纯 GameServer 节点
 Redis 共享 session/nonce
 DB 共享权威数据
 ```

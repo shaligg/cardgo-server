@@ -18,10 +18,8 @@ type Session struct {
 }
 
 // Manager 管理 uid 与当前连接会话的绑定关系。
-//
-// Bind 返回旧连接 ID，调用方可以据此踢掉同账号的旧连接。
 type Manager interface {
-	Bind(ctx context.Context, s Session) (oldConnID string, err error)
+	BindWithinLimit(ctx context.Context, s Session, maxSessions int) (oldConnID string, accepted bool, err error)
 	GetByUID(ctx context.Context, uid string) (Session, bool, error)
 	Unbind(ctx context.Context, uid, connID string) error
 	Count(ctx context.Context) (int, error)
@@ -40,14 +38,18 @@ func NewMemoryManager() *MemoryManager {
 	return &MemoryManager{items: make(map[string]Session)}
 }
 
-// Bind 绑定玩家当前连接，并返回该玩家之前的连接 ID。
-func (m *MemoryManager) Bind(ctx context.Context, s Session) (string, error) {
+// BindWithinLimit 在同一临界区内完成容量判断和会话绑定。
+// 已在线 UID 替换连接时不会增加会话数量，因此即使达到上限也允许绑定。
+func (m *MemoryManager) BindWithinLimit(ctx context.Context, s Session, maxSessions int) (string, bool, error) {
 	_ = ctx
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	old := m.items[s.UID]
+	old, exists := m.items[s.UID]
+	if !exists && maxSessions > 0 && len(m.items) >= maxSessions {
+		return "", false, nil
+	}
 	m.items[s.UID] = s
-	return old.ConnID, nil
+	return old.ConnID, true, nil
 }
 
 // GetByUID 查询玩家当前连接会话。
@@ -79,4 +81,16 @@ func (m *MemoryManager) Count(ctx context.Context) (int, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.items), nil
+}
+
+// List 返回当前节点全部在线会话的副本。
+func (m *MemoryManager) List(ctx context.Context) []Session {
+	_ = ctx
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Session, 0, len(m.items))
+	for _, item := range m.items {
+		out = append(out, item)
+	}
+	return out
 }

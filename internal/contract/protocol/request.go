@@ -65,3 +65,22 @@ type WorkshopUpgradeFacilityRequest struct {
 type WorkshopClaimOfflineRequest struct {
 	ReqID string `json:"req_id,omitempty"`
 }
+
+// WebSearchRequest 是网页搜索请求。
+type WebSearchRequest struct {
+	Query string `json:"query,omitempty"`
+}
+
+// WebSearchResult 是返回客户端的一条网页搜索结果。
+type WebSearchResult struct {
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	URL         string `json:"url"`
+}
+
+// WebSearchResponse 是网页搜索响应；超时时丢弃外部结果并返回空列表。
+type WebSearchResponse struct {
+	Query    string            `json:"query"`
+	Results  []WebSearchResult `json:"results"`
+	TimedOut bool              `json:"timed_out"`
+}

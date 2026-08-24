@@ -2,7 +2,11 @@ package login
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
+	"sort"
+	"time"
 )
 
 // ErrNoAvailableNode 表示当前没有可分配的 GameServer。
@@ -12,7 +16,7 @@ var ErrNoAvailableNode = errors.New("no available game server")
 
 // NodeInfo 是登录服看到的 GameServer 节点状态。
 //
-// MVP 阶段可以由静态配置提供；多节点阶段通常由 GameServer 心跳上报到 Redis/DB 后提供。
+// 当前由 GameServer 定时上报到 Redis，LoginService 每次分配时读取存活节点。
 type NodeInfo struct {
 	ServerID  string
 	WSAddr    string
@@ -36,21 +40,27 @@ func (n NodeInfo) Available() bool {
 
 // NodeRegistry 提供当前 GameServer 节点列表。
 //
-// 这个接口是未来多 GameServer、服务发现和 AccessGateway 路由的共同基础。
+// LoginService 只依赖此接口，不感知节点来自 Redis 或其他服务发现组件。
 type NodeRegistry interface {
 	ListNodes(ctx context.Context) ([]NodeInfo, error)
 }
 
-// LastServerStore 记录玩家上一次所在的 GameServer。
+// NodeRegistrar 负责注册、刷新和注销 GameServer 运行状态。
+type NodeRegistrar interface {
+	UpsertNode(ctx context.Context, node NodeInfo, ttl time.Duration) error
+	RemoveNode(ctx context.Context, serverID string) error
+}
+
+// LastServerReader 读取玩家最近一次成功进入的 GameServer。
 //
-// 重连时 NodeAllocator 会优先尝试把玩家分配回原服，以便恢复本机内存热状态。
-type LastServerStore interface {
+// 该接口只读；归属只能由 GameServer 在鉴权并绑定会话成功后更新。
+type LastServerReader interface {
 	GetLastServerID(ctx context.Context, uid string) (serverID string, ok bool, err error)
 }
 
 // StaticNodeRegistry 是基于静态配置的节点注册表。
 //
-// 当前 demo 用它提供单节点能力；未来可以替换为 Redis/DB/服务发现实现。
+// 它只用于分配器单元测试，不进入当前运行链路。
 type StaticNodeRegistry struct {
 	Nodes []NodeInfo
 }
@@ -70,15 +80,14 @@ type NodeAllocator interface {
 
 // RegistryNodeAllocator 基于 NodeRegistry 选择 GameServer。
 //
-// 规则：重连优先原服；原服不可用时，选择健康、非 drain、未满载且负载最低的节点。
+// 规则：重连优先原服；原服不可用时，从健康、非 drain、未满载节点中做负载感知的两选一分配。
 type RegistryNodeAllocator struct {
 	Registry   NodeRegistry
-	LastServer LastServerStore
+	LastServer LastServerReader
 }
 
 // Allocate 为玩家选择一个 GameServer。
 func (a RegistryNodeAllocator) Allocate(ctx context.Context, uid string, clientIP string) (string, string, error) {
-	_ = clientIP
 	if a.Registry == nil {
 		return "", "", ErrNoAvailableNode
 	}
@@ -102,7 +111,11 @@ func (a RegistryNodeAllocator) Allocate(ctx context.Context, uid string, clientI
 		}
 	}
 
-	node, ok := pickLowestLoadNode(nodes)
+	allocationKey := uid
+	if allocationKey == "" {
+		allocationKey = clientIP
+	}
+	node, ok := pickLoadAwareNode(nodes, allocationKey)
 	if !ok {
 		return "", "", ErrNoAvailableNode
 	}
@@ -134,19 +147,33 @@ func findAvailableNode(nodes []NodeInfo, serverID string) (NodeInfo, bool) {
 	return NodeInfo{}, false
 }
 
-func pickLowestLoadNode(nodes []NodeInfo) (NodeInfo, bool) {
-	var best NodeInfo
-	found := false
+// pickLoadAwareNode 使用稳定的“两选一”策略，避免心跳数据相同时所有登录都涌向同一节点。
+func pickLoadAwareNode(nodes []NodeInfo, allocationKey string) (NodeInfo, bool) {
+	available := make([]NodeInfo, 0, len(nodes))
 	for _, node := range nodes {
-		if !node.Available() {
-			continue
-		}
-		if !found || lessLoad(node, best) {
-			best = node
-			found = true
+		if node.Available() {
+			available = append(available, node)
 		}
 	}
-	return best, found
+	if len(available) == 0 {
+		return NodeInfo{}, false
+	}
+	if len(available) == 1 {
+		return available[0], true
+	}
+
+	sort.Slice(available, func(i, j int) bool {
+		return available[i].ServerID < available[j].ServerID
+	})
+	firstIndex := int(hashString(allocationKey) % uint32(len(available)))
+	secondOffset := 1 + int(hashString(allocationKey+"#second")%uint32(len(available)-1))
+	secondIndex := (firstIndex + secondOffset) % len(available)
+	first := available[firstIndex]
+	second := available[secondIndex]
+	if lessLoad(second, first) {
+		return second, true
+	}
+	return first, true
 }
 
 func lessLoad(a NodeInfo, b NodeInfo) bool {
@@ -155,10 +182,7 @@ func lessLoad(a NodeInfo, b NodeInfo) bool {
 	if aRatio != bRatio {
 		return aRatio < bRatio
 	}
-	if a.Online != b.Online {
-		return a.Online < b.Online
-	}
-	return a.ServerID < b.ServerID
+	return a.Online < b.Online
 }
 
 func loadRatio(n NodeInfo) float64 {
@@ -166,4 +190,9 @@ func loadRatio(n NodeInfo) float64 {
 		return 0
 	}
 	return float64(n.Online) / float64(n.MaxOnline)
+}
+
+func hashString(value string) uint32 {
+	sum := sha256.Sum256([]byte(value))
+	return binary.BigEndian.Uint32(sum[:4])
 }

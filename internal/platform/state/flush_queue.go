@@ -18,7 +18,6 @@ type FlushTask struct {
 type FlushQueue interface {
 	Enqueue(ctx context.Context, task FlushTask) error
 	DequeueBatch(ctx context.Context, max int) ([]FlushTask, error)
-	Drain(ctx context.Context) error
 	Len() int
 }
 
@@ -49,14 +48,6 @@ func (q *MemoryFlushQueue) Enqueue(ctx context.Context, task FlushTask) error {
 		task.EnqueueAt = time.Now()
 	}
 	q.items = append(q.items, task)
-	return nil
-}
-
-func (q *MemoryFlushQueue) Drain(ctx context.Context) error {
-	_ = ctx
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.items = q.items[:0]
 	return nil
 }
 

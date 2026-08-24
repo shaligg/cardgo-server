@@ -47,9 +47,9 @@ func TestPlayerHandlerIgnoresPayloadUIDForWrite(t *testing.T) {
 			Inventory: dbRepo,
 		},
 	}
-	handler := newPlayerHandler(playerService, nil)
+	handler := &BizHandler{PlayerService: playerService}
 
-	_, bizErr := handler.AddGold(context.Background(), "auth_uid", json.RawMessage(`{"uid":"evil_uid","delta":10,"req_id":"r1"}`))
+	_, bizErr := handler.PlayerAddGold(context.Background(), "auth_uid", json.RawMessage(`{"uid":"evil_uid","delta":10,"req_id":"r1"}`))
 	if bizErr != nil {
 		t.Fatalf("AddGold returned error: %v", bizErr)
 	}

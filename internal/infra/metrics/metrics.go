@@ -7,7 +7,6 @@ type Snapshot struct {
 	WSAuthSuccess  int64 `json:"ws_auth_success"`
 	WSAuthFailed   int64 `json:"ws_auth_failed"`
 	WSRateLimited  int64 `json:"ws_rate_limited"`
-	WSQueueDrop    int64 `json:"ws_queue_drop"`
 	WSQueueKick    int64 `json:"ws_queue_kick"`
 	FlushEnqueued  int64 `json:"flush_enqueued"`
 	FlushQueueLen  int64 `json:"flush_queue_len"`
@@ -23,7 +22,6 @@ type Registry struct {
 	wsAuthSuccess atomic.Int64
 	wsAuthFailed  atomic.Int64
 	wsRateLimited atomic.Int64
-	wsQueueDrop   atomic.Int64
 	wsQueueKick   atomic.Int64
 
 	flushEnqueued  atomic.Int64
@@ -43,7 +41,6 @@ func (r *Registry) SetWSConnections(v int64) { r.wsConnections.Store(v) }
 func (r *Registry) IncWSAuthSuccess()        { r.wsAuthSuccess.Add(1) }
 func (r *Registry) IncWSAuthFailed()         { r.wsAuthFailed.Add(1) }
 func (r *Registry) IncWSRateLimited()        { r.wsRateLimited.Add(1) }
-func (r *Registry) IncWSQueueDrop()          { r.wsQueueDrop.Add(1) }
 func (r *Registry) IncWSQueueKick()          { r.wsQueueKick.Add(1) }
 
 func (r *Registry) IncFlushEnqueued()        { r.flushEnqueued.Add(1) }
@@ -60,7 +57,6 @@ func (r *Registry) Snapshot() Snapshot {
 		WSAuthSuccess:  r.wsAuthSuccess.Load(),
 		WSAuthFailed:   r.wsAuthFailed.Load(),
 		WSRateLimited:  r.wsRateLimited.Load(),
-		WSQueueDrop:    r.wsQueueDrop.Load(),
 		WSQueueKick:    r.wsQueueKick.Load(),
 		FlushEnqueued:  r.flushEnqueued.Load(),
 		FlushQueueLen:  r.flushQueueLen.Load(),

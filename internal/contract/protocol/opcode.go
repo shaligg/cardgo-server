@@ -1,6 +1,6 @@
 // Package protocol 维护客户端与服务端共享的业务协议号。
 //
-// 新增业务协议时，先在这里登记 op_code，再到 app/biz_routes.go 绑定实现函数。
+// 新增业务协议时，先在这里登记 op_code，再到 handler/routes.go 绑定实现函数。
 package protocol
 
 const (
@@ -23,4 +23,6 @@ const (
 	OpWorkshopGetOverview     int32 = 1401
 	OpWorkshopUpgradeFacility int32 = 1402
 	OpWorkshopClaimOffline    int32 = 1403
+
+	OpWebSearch int32 = 1501
 )

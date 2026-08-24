@@ -12,6 +12,7 @@ import (
 	"github.com/bigfish/go_orm_1/internal/game/asset"
 	"github.com/bigfish/go_orm_1/internal/gamedata"
 	idb "github.com/bigfish/go_orm_1/internal/infra/db"
+	"github.com/bigfish/go_orm_1/internal/repo"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -19,6 +20,8 @@ import (
 var (
 	// ErrInvalidReqID 表示需要幂等请求 ID 的操作没有传入 req_id。
 	ErrInvalidReqID = errors.New("invalid req_id")
+	// ErrReqIDConflict 表示同一幂等请求 ID 被用于不同操作参数。
+	ErrReqIDConflict = errors.New("req_id conflicts with previous request")
 	// ErrGameDataMissing 表示关卡运行依赖的策划配置缺失。
 	ErrGameDataMissing = errors.New("game data is missing")
 	// ErrLevelNotFound 表示请求的关卡不存在。
@@ -73,6 +76,7 @@ type LevelSettleResult struct {
 	LevelID         int64              `json:"level_id"`
 	CompletedOrders int64              `json:"completed_orders"`
 	Rewards         []asset.RewardItem `json:"rewards"`
+	Player          *repo.Player       `json:"-"`
 }
 
 // Service 是关卡运行时服务。
@@ -83,6 +87,7 @@ type Service struct {
 
 	mu       sync.Mutex
 	sessions map[string]*runtimeSession
+	starts   map[requestKey]startRecord
 }
 
 type runtimeSession struct {
@@ -90,16 +95,46 @@ type runtimeSession struct {
 	level          gamedata.LevelConfig
 	nextOrderIndex int
 	pendingRewards []asset.RewardItem
+	playResults    map[string]playRecord
 	settleResult   *LevelSettleResult
+}
+
+type requestKey struct {
+	uid   string
+	reqID string
+}
+
+type startRecord struct {
+	levelID int64
+	result  LevelSession
+}
+
+type playRecord struct {
+	cardID int64
+	result PlayCardResult
 }
 
 // StartLevel 创建一个新的内存关卡会话。
 func (s *Service) StartLevel(ctx context.Context, uid string, levelID int64, reqID string) (LevelSession, error) {
 	_ = ctx
-	_ = reqID
+	if reqID == "" {
+		return LevelSession{}, ErrInvalidReqID
+	}
 	if s.Data == nil {
 		return LevelSession{}, ErrGameDataMissing
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.initLocked()
+	key := requestKey{uid: uid, reqID: reqID}
+	if previous, ok := s.starts[key]; ok {
+		if previous.levelID != levelID {
+			return LevelSession{}, ErrReqIDConflict
+		}
+		return cloneSession(previous.result), nil
+	}
+
 	level, ok := s.Data.Levels[levelID]
 	if !ok {
 		return LevelSession{}, fmt.Errorf("%w: %d", ErrLevelNotFound, levelID)
@@ -108,6 +143,7 @@ func (s *Service) StartLevel(ctx context.Context, uid string, levelID int64, req
 	rs := &runtimeSession{
 		level:          level,
 		nextOrderIndex: 0,
+		playResults:    map[string]playRecord{},
 		state: LevelSession{
 			SessionID:   uuid.NewString(),
 			UID:         uid,
@@ -124,23 +160,33 @@ func (s *Service) StartLevel(ctx context.Context, uid string, levelID int64, req
 		rs.state.ActiveOrders = append(rs.state.ActiveOrders, s.nextOrder(rs))
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.initLocked()
 	s.sessions[rs.state.SessionID] = rs
-	return cloneSession(rs.state), nil
+	result := cloneSession(rs.state)
+	s.starts[key] = startRecord{levelID: levelID, result: result}
+	return cloneSession(result), nil
 }
 
 // PlayCard 执行一张卡牌的 MVP 效果，并尝试自动完成满足条件的订单。
 func (s *Service) PlayCard(ctx context.Context, uid string, sessionID string, cardID int64, reqID string) (PlayCardResult, error) {
 	_ = ctx
-	_ = reqID
+	if reqID == "" {
+		return PlayCardResult{}, ErrInvalidReqID
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	rs, err := s.getSessionLocked(uid, sessionID)
 	if err != nil {
 		return PlayCardResult{}, err
+	}
+	if rs.playResults == nil {
+		rs.playResults = map[string]playRecord{}
+	}
+	if previous, ok := rs.playResults[reqID]; ok {
+		if previous.cardID != cardID {
+			return PlayCardResult{}, ErrReqIDConflict
+		}
+		return clonePlayCardResult(previous.result), nil
 	}
 	if s.Data == nil {
 		return PlayCardResult{}, ErrGameDataMissing
@@ -153,13 +199,19 @@ func (s *Service) PlayCard(ctx context.Context, uid string, sessionID string, ca
 		return PlayCardResult{}, fmt.Errorf("%w: %d", ErrCardNotInSession, cardID)
 	}
 	if rs.state.Settled {
-		return PlayCardResult{Session: cloneSession(rs.state), CardID: cardID}, nil
+		result := PlayCardResult{Session: cloneSession(rs.state), CardID: cardID}
+		rs.playResults[reqID] = playRecord{cardID: cardID, result: result}
+		return clonePlayCardResult(result), nil
 	}
-	if err := applyCardEffects(&rs.state, card); err != nil {
+	nextState := cloneSession(rs.state)
+	if err := applyCardEffects(&nextState, card); err != nil {
 		return PlayCardResult{}, err
 	}
+	rs.state = nextState
 	s.completeReadyOrders(rs)
-	return PlayCardResult{Session: cloneSession(rs.state), CardID: cardID}, nil
+	result := PlayCardResult{Session: cloneSession(rs.state), CardID: cardID}
+	rs.playResults[reqID] = playRecord{cardID: cardID, result: result}
+	return clonePlayCardResult(result), nil
 }
 
 // SettleLevel 结算关卡并发放奖励。
@@ -171,18 +223,15 @@ func (s *Service) SettleLevel(ctx context.Context, uid string, sessionID string,
 	}
 
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	rs, err := s.getSessionLocked(uid, sessionID)
 	if err != nil {
-		s.mu.Unlock()
 		return LevelSettleResult{}, err
 	}
 	if rs.settleResult != nil {
-		out := *rs.settleResult
-		s.mu.Unlock()
-		return out, nil
+		return *rs.settleResult, nil
 	}
 	if rs.state.CompletedOrders < rs.level.Goal.Target {
-		s.mu.Unlock()
 		return LevelSettleResult{}, ErrLevelNotComplete
 	}
 
@@ -190,7 +239,6 @@ func (s *Service) SettleLevel(ctx context.Context, uid string, sessionID string,
 	for _, reward := range rs.level.FirstClearRewards {
 		rewards = append(rewards, asset.RewardItem{ItemID: reward.ItemID, Count: reward.Count})
 	}
-	rs.state.Settled = true
 	result := LevelSettleResult{
 		OK:              true,
 		SessionID:       rs.state.SessionID,
@@ -198,23 +246,34 @@ func (s *Service) SettleLevel(ctx context.Context, uid string, sessionID string,
 		CompletedOrders: rs.state.CompletedOrders,
 		Rewards:         rewards,
 	}
-	rs.settleResult = &result
-	s.mu.Unlock()
 
 	if len(rewards) > 0 {
+		var changes []asset.ChangeResult
 		if err := s.Tx.Do(ctx, func(tx *gorm.DB) error {
-			_, err := s.Assets.ApplyRewardInTx(ctx, tx, uid, rewards, "level.settle", reqID)
+			var err error
+			changes, err = s.Assets.ApplyRewardInTx(ctx, tx, uid, rewards, "level.settle", reqID)
 			return err
 		}); err != nil {
 			return LevelSettleResult{}, err
 		}
+		for _, change := range changes {
+			if change.Player != nil {
+				player := *change.Player
+				result.Player = &player
+			}
+		}
 	}
+	rs.state.Settled = true
+	rs.settleResult = &result
 	return result, nil
 }
 
 func (s *Service) initLocked() {
 	if s.sessions == nil {
 		s.sessions = map[string]*runtimeSession{}
+	}
+	if s.starts == nil {
+		s.starts = map[requestKey]startRecord{}
 	}
 }
 
@@ -225,6 +284,48 @@ func (s *Service) getSessionLocked(uid string, sessionID string) (*runtimeSessio
 		return nil, ErrSessionNotFound
 	}
 	return rs, nil
+}
+
+// PlayerUIDs 返回当前节点仍保存局内状态的玩家 UID。
+func (s *Service) PlayerUIDs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.initLocked()
+	seen := make(map[string]struct{}, len(s.sessions))
+	out := make([]string, 0, len(s.sessions))
+	for _, runtime := range s.sessions {
+		uid := runtime.state.UID
+		if uid == "" {
+			continue
+		}
+		if _, ok := seen[uid]; ok {
+			continue
+		}
+		seen[uid] = struct{}{}
+		out = append(out, uid)
+	}
+	return out
+}
+
+// DeletePlayerRuntime 删除指定玩家在当前节点的全部关卡运行时。
+func (s *Service) DeletePlayerRuntime(uid string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.initLocked()
+	deleted := 0
+	for sessionID, runtime := range s.sessions {
+		if runtime.state.UID != uid {
+			continue
+		}
+		delete(s.sessions, sessionID)
+		deleted++
+	}
+	for key := range s.starts {
+		if key.uid == uid {
+			delete(s.starts, key)
+		}
+	}
+	return deleted
 }
 
 func (s *Service) nextOrder(rs *runtimeSession) OrderState {
@@ -321,5 +422,11 @@ func cloneSession(in LevelSession) LevelSession {
 	}
 	out.HandCards = append([]int64(nil), in.HandCards...)
 	out.ActiveOrders = append([]OrderState(nil), in.ActiveOrders...)
+	return out
+}
+
+func clonePlayCardResult(in PlayCardResult) PlayCardResult {
+	out := in
+	out.Session = cloneSession(in.Session)
 	return out
 }

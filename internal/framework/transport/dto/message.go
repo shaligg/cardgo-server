@@ -52,7 +52,6 @@ const (
 	TypeHeartbeatAck = "heartbeat_ack"
 	TypeBizReq       = "biz_req"
 	TypeBizAck       = "biz_ack"
-	TypePush         = "push"
 	TypeError        = "error"
 	TypeKick         = "kick"
 	TypeServerFull   = "server_full"

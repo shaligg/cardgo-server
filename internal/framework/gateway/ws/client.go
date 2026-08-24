@@ -79,6 +79,8 @@ func (c *Client) RunWritePump() {
 func (c *Client) Close() {
 	c.closeOnce.Do(func() {
 		close(c.closed)
-		_ = c.Conn.Close()
+		if c.Conn != nil {
+			_ = c.Conn.Close()
+		}
 	})
 }

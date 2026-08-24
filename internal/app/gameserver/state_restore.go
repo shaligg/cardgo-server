@@ -11,6 +11,7 @@ func buildRestoreStateCallback(online *state.OnlineState, snapshots state.Snapsh
 	return func(ctx context.Context, uid string) (map[string]interface{}, bool) {
 		if online != nil {
 			if st, ok := online.Get(uid); ok {
+				online.MarkOnline(uid)
 				return cloneMap(st.Data), true
 			}
 		}

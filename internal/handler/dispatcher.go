@@ -31,15 +31,19 @@ func (d *Dispatcher) Handle(ctx context.Context, uid string, opCode int32, paylo
 
 	// 普通玩家 WS 协议只能操作鉴权 uid，不能由 payload.uid 覆盖。
 	targetUID := uid
+	route, ok := d.router.resolve(opCode)
+	if !ok {
+		return nil, &terrors.BizError{Code: terrors.CodeUnsupported, Msg: "unsupported op_code"}
+	}
 
-	if d.exec == nil {
-		return d.router.Handle(ctx, opCode, targetUID, payload)
+	if d.exec == nil || route.mode == ExecutionHandlerManaged {
+		return route.handler(ctx, targetUID, payload)
 	}
 
 	var out interface{}
 	var bizErr *terrors.BizError
 	err := d.exec.Submit(ctx, dispatcher.DomainPlayer, targetUID, func(taskCtx context.Context) error {
-		out, bizErr = d.router.Handle(taskCtx, opCode, targetUID, payload)
+		out, bizErr = route.handler(taskCtx, targetUID, payload)
 		return nil
 	})
 	if err != nil {

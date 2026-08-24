@@ -6,60 +6,49 @@ import (
 
 	"github.com/bigfish/go_orm_1/internal/contract/protocol"
 	terrors "github.com/bigfish/go_orm_1/internal/framework/transport/errors"
-	workshopsvc "github.com/bigfish/go_orm_1/internal/game/workshop"
-	"github.com/bigfish/go_orm_1/internal/platform/state"
 )
 
-// workshopHandler 处理工坊协议。
-//
-// Handler 只负责拆包取参数和调用 WorkshopService，具体工坊规则不写在协议层。
-type workshopHandler struct {
-	workshopService workshopsvc.Service
-	online          *state.OnlineState
-}
-
-func newWorkshopHandler(workshopService workshopsvc.Service, online *state.OnlineState) *workshopHandler {
-	return &workshopHandler{workshopService: workshopService, online: online}
-}
-
-func (h *workshopHandler) GetOverview(ctx context.Context, targetUID string, payload json.RawMessage) (interface{}, *terrors.BizError) {
+// WorkshopGetOverview 处理工坊总览协议。
+func (h *BizHandler) WorkshopGetOverview(ctx context.Context, targetUID string, payload json.RawMessage) (interface{}, *terrors.BizError) {
 	var req protocol.UIDRequest
 	if len(payload) > 0 && json.Unmarshal(payload, &req) != nil {
 		return nil, &terrors.BizError{Code: terrors.CodeBadRequest, Msg: "invalid workshop_get_overview payload"}
 	}
-	overview, err := h.workshopService.GetOverview(ctx, targetUID)
+	overview, err := h.WorkshopService.GetOverview(ctx, targetUID)
 	if err != nil {
 		return nil, toBizError(err)
 	}
 	return overview, nil
 }
 
-func (h *workshopHandler) UpgradeFacility(ctx context.Context, targetUID string, payload json.RawMessage) (interface{}, *terrors.BizError) {
+// WorkshopUpgradeFacility 处理工坊设施升级协议。
+func (h *BizHandler) WorkshopUpgradeFacility(ctx context.Context, targetUID string, payload json.RawMessage) (interface{}, *terrors.BizError) {
 	var req protocol.WorkshopUpgradeFacilityRequest
 	if len(payload) == 0 || json.Unmarshal(payload, &req) != nil {
 		return nil, &terrors.BizError{Code: terrors.CodeBadRequest, Msg: "invalid workshop_upgrade_facility payload"}
 	}
-	result, err := h.workshopService.UpgradeFacility(ctx, targetUID, req.FacilityID, req.ReqID)
+	result, err := h.WorkshopService.UpgradeFacility(ctx, targetUID, req.FacilityID, req.ReqID)
 	if err != nil {
 		return nil, toBizError(err)
 	}
 	if result.Player != nil {
-		syncOnlinePlayerState(h.online, *result.Player)
+		syncOnlinePlayerState(h.Online, *result.Player)
 	}
 	return result, nil
 }
 
-func (h *workshopHandler) ClaimOfflineReward(ctx context.Context, targetUID string, payload json.RawMessage) (interface{}, *terrors.BizError) {
+// WorkshopClaimOfflineReward 处理工坊离线奖励领取协议。
+func (h *BizHandler) WorkshopClaimOfflineReward(ctx context.Context, targetUID string, payload json.RawMessage) (interface{}, *terrors.BizError) {
 	var req protocol.WorkshopClaimOfflineRequest
 	if len(payload) == 0 || json.Unmarshal(payload, &req) != nil {
 		return nil, &terrors.BizError{Code: terrors.CodeBadRequest, Msg: "invalid workshop_claim_offline_reward payload"}
 	}
-	result, err := h.workshopService.ClaimOfflineReward(ctx, targetUID, req.ReqID)
+	result, err := h.WorkshopService.ClaimOfflineReward(ctx, targetUID, req.ReqID)
 	if err != nil {
 		return nil, toBizError(err)
 	}
 	if result.Player != nil {
-		syncOnlinePlayerState(h.online, *result.Player)
+		syncOnlinePlayerState(h.Online, *result.Player)
 	}
 	return result, nil
 }

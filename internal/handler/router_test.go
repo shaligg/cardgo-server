@@ -20,8 +20,7 @@ func TestBizRouterReturnsUnsupportedOpCode(t *testing.T) {
 }
 
 func TestRegisterBizRoutesCanDisableDebugOps(t *testing.T) {
-	router := NewRouter()
-	registerBizRoutes(router, &playerHandler{}, &assetHandler{}, &cardHandler{}, &levelHandler{}, &workshopHandler{}, false)
+	router := NewRegisteredRouter(&BizHandler{}, false)
 
 	if _, ok := router.handlers[protocol.OpPlayerGetProfile]; !ok {
 		t.Fatalf("player.get_profile should always be registered")
@@ -39,8 +38,7 @@ func TestRegisterBizRoutesCanDisableDebugOps(t *testing.T) {
 }
 
 func TestRegisterBizRoutesCanEnableDebugOps(t *testing.T) {
-	router := NewRouter()
-	registerBizRoutes(router, &playerHandler{}, &assetHandler{}, &cardHandler{}, &levelHandler{}, &workshopHandler{}, true)
+	router := NewRegisteredRouter(&BizHandler{}, true)
 
 	for _, opCode := range []int32{
 		protocol.OpPlayerAddGold,

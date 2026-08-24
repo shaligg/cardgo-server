@@ -25,3 +25,10 @@ func (l *RateLimiter) Allow(key string) bool {
 	l.lastHit[key] = now
 	return true
 }
+
+// Delete 删除连接关闭后不再使用的限流记录。
+func (l *RateLimiter) Delete(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.lastHit, key)
+}

@@ -3,16 +3,25 @@ package login
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 )
 
-type fakeLastServerStore struct {
+type fakeLastServerReader struct {
 	serverID string
 	ok       bool
 	err      error
 }
 
-func (s fakeLastServerStore) GetLastServerID(ctx context.Context, uid string) (string, bool, error) {
+type failingNodeRegistry struct {
+	err error
+}
+
+func (r failingNodeRegistry) ListNodes(context.Context) ([]NodeInfo, error) {
+	return nil, r.err
+}
+
+func (s fakeLastServerReader) GetLastServerID(ctx context.Context, uid string) (string, bool, error) {
 	_ = ctx
 	_ = uid
 	return s.serverID, s.ok, s.err
@@ -24,7 +33,7 @@ func TestRegistryNodeAllocatorPrefersLastServer(t *testing.T) {
 			{ServerID: "gs-a", WSAddr: "ws://a/ws", Online: 100, MaxOnline: 2000, Healthy: true},
 			{ServerID: "gs-b", WSAddr: "ws://b/ws", Online: 10, MaxOnline: 2000, Healthy: true},
 		}},
-		LastServer: fakeLastServerStore{serverID: "gs-a", ok: true},
+		LastServer: fakeLastServerReader{serverID: "gs-a", ok: true},
 	}
 
 	serverID, wsAddr, err := allocator.Allocate(context.Background(), "u1", "127.0.0.1")
@@ -42,7 +51,7 @@ func TestRegistryNodeAllocatorSkipsUnavailableLastServer(t *testing.T) {
 			{ServerID: "gs-a", WSAddr: "ws://a/ws", Online: 2000, MaxOnline: 2000, Healthy: true},
 			{ServerID: "gs-b", WSAddr: "ws://b/ws", Online: 100, MaxOnline: 2000, Healthy: true},
 		}},
-		LastServer: fakeLastServerStore{serverID: "gs-a", ok: true},
+		LastServer: fakeLastServerReader{serverID: "gs-a", ok: true},
 	}
 
 	serverID, wsAddr, err := allocator.Allocate(context.Background(), "u1", "127.0.0.1")
@@ -72,6 +81,28 @@ func TestRegistryNodeAllocatorPicksLowestLoad(t *testing.T) {
 	}
 }
 
+func TestRegistryNodeAllocatorDistributesEqualLoadNodes(t *testing.T) {
+	allocator := RegistryNodeAllocator{
+		Registry: StaticNodeRegistry{Nodes: []NodeInfo{
+			{ServerID: "gs-a", WSAddr: "ws://a/ws", MaxOnline: 2000, Healthy: true},
+			{ServerID: "gs-b", WSAddr: "ws://b/ws", MaxOnline: 2000, Healthy: true},
+			{ServerID: "gs-c", WSAddr: "ws://c/ws", MaxOnline: 2000, Healthy: true},
+		}},
+	}
+
+	selected := make(map[string]bool)
+	for i := 0; i < 100; i++ {
+		serverID, _, err := allocator.Allocate(context.Background(), fmt.Sprintf("user-%d", i), "127.0.0.1")
+		if err != nil {
+			t.Fatalf("Allocate returned error: %v", err)
+		}
+		selected[serverID] = true
+	}
+	if len(selected) != 3 {
+		t.Fatalf("expected equal-load requests to reach all nodes, got %v", selected)
+	}
+}
+
 func TestRegistryNodeAllocatorNoAvailableNode(t *testing.T) {
 	allocator := RegistryNodeAllocator{
 		Registry: StaticNodeRegistry{Nodes: []NodeInfo{
@@ -86,11 +117,21 @@ func TestRegistryNodeAllocatorNoAvailableNode(t *testing.T) {
 	}
 }
 
-func TestRegistryNodeAllocatorReturnsLastServerStoreError(t *testing.T) {
+func TestRegistryNodeAllocatorReturnsRegistryError(t *testing.T) {
+	wantErr := errors.New("redis unavailable")
+	allocator := RegistryNodeAllocator{Registry: failingNodeRegistry{err: wantErr}}
+
+	_, _, err := allocator.Allocate(context.Background(), "u1", "127.0.0.1")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected registry error, got %v", err)
+	}
+}
+
+func TestRegistryNodeAllocatorReturnsLastServerReaderError(t *testing.T) {
 	wantErr := errors.New("last server unavailable")
 	allocator := RegistryNodeAllocator{
 		Registry:   StaticNodeRegistry{Nodes: []NodeInfo{{ServerID: "gs-a", WSAddr: "ws://a/ws", Healthy: true}}},
-		LastServer: fakeLastServerStore{err: wantErr},
+		LastServer: fakeLastServerReader{err: wantErr},
 	}
 
 	_, _, err := allocator.Allocate(context.Background(), "u1", "127.0.0.1")

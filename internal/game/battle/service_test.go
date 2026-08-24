@@ -2,6 +2,7 @@ package battle
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/bigfish/go_orm_1/internal/game/asset"
@@ -13,8 +14,9 @@ import (
 )
 
 type fakePlayerRepo struct {
-	player     repo.Player
-	grantCalls int
+	player        repo.Player
+	grantCalls    int
+	failNextGrant bool
 }
 
 func (r *fakePlayerRepo) GetByUID(ctx context.Context, uid string) (repo.Player, error) {
@@ -40,6 +42,10 @@ func (r *fakePlayerRepo) ChangeGold(ctx context.Context, uid string, delta int64
 
 func (r *fakePlayerRepo) ChangeGoldInTx(ctx context.Context, tx *gorm.DB, uid string, delta int64, itemID int64, reason string, reqID string) (repo.Player, error) {
 	_ = tx
+	if r.failNextGrant {
+		r.failNextGrant = false
+		return repo.Player{}, errors.New("forced grant failure")
+	}
 	return r.ChangeGold(ctx, uid, delta, itemID, reason, reqID)
 }
 
@@ -107,6 +113,9 @@ func TestLevelFlowSettleGrantsRewardsOnce(t *testing.T) {
 	if !result.OK || result.CompletedOrders != 1 {
 		t.Fatalf("unexpected settle result: %+v", result)
 	}
+	if result.Player == nil || result.Player.Gold != 28 {
+		t.Fatalf("settle player = %+v, want gold 28", result.Player)
+	}
 	if players.player.Gold != 28 {
 		t.Fatalf("gold = %d, want 28", players.player.Gold)
 	}
@@ -123,6 +132,109 @@ func TestLevelFlowSettleGrantsRewardsOnce(t *testing.T) {
 	}
 }
 
+func TestStartLevelRequiresReqID(t *testing.T) {
+	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
+
+	if _, err := svc.StartLevel(context.Background(), "u1", 1, ""); !errors.Is(err, ErrInvalidReqID) {
+		t.Fatalf("StartLevel error = %v, want ErrInvalidReqID", err)
+	}
+}
+
+func TestStartLevelReturnsFirstResultForDuplicateReqID(t *testing.T) {
+	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
+	first, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("first StartLevel: %v", err)
+	}
+
+	retried, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("retried StartLevel: %v", err)
+	}
+	if retried.SessionID != first.SessionID || len(svc.sessions) != 1 {
+		t.Fatalf("retried session = %s, first = %s, sessions = %d", retried.SessionID, first.SessionID, len(svc.sessions))
+	}
+}
+
+func TestStartLevelRejectsReqIDConflict(t *testing.T) {
+	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
+	if _, err := svc.StartLevel(context.Background(), "u1", 1, "start-1"); err != nil {
+		t.Fatalf("first StartLevel: %v", err)
+	}
+
+	if _, err := svc.StartLevel(context.Background(), "u1", 2, "start-1"); !errors.Is(err, ErrReqIDConflict) {
+		t.Fatalf("conflicting StartLevel error = %v, want ErrReqIDConflict", err)
+	}
+}
+
+func TestPlayCardRequiresReqID(t *testing.T) {
+	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
+	session, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("StartLevel: %v", err)
+	}
+
+	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, ""); !errors.Is(err, ErrInvalidReqID) {
+		t.Fatalf("PlayCard error = %v, want ErrInvalidReqID", err)
+	}
+}
+
+func TestPlayCardReturnsFirstResultForDuplicateReqID(t *testing.T) {
+	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
+	session, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("StartLevel: %v", err)
+	}
+	first, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, "play-1")
+	if err != nil {
+		t.Fatalf("first PlayCard: %v", err)
+	}
+
+	retried, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, "play-1")
+	if err != nil {
+		t.Fatalf("retried PlayCard: %v", err)
+	}
+	if retried.Session.CompletedOrders != first.Session.CompletedOrders || retried.Session.Resources["bread"] != first.Session.Resources["bread"] {
+		t.Fatalf("retried result = %+v, first = %+v", retried, first)
+	}
+	if current := svc.sessions[session.SessionID].state.Resources["bread"]; current != 0 {
+		t.Fatalf("duplicate PlayCard advanced state, bread = %d", current)
+	}
+}
+
+func TestPlayCardRejectsReqIDConflict(t *testing.T) {
+	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
+	session, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("StartLevel: %v", err)
+	}
+	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, "play-1"); err != nil {
+		t.Fatalf("first PlayCard: %v", err)
+	}
+
+	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 99999, "play-1"); !errors.Is(err, ErrReqIDConflict) {
+		t.Fatalf("conflicting PlayCard error = %v, want ErrReqIDConflict", err)
+	}
+}
+
+func TestPlayCardFailureDoesNotReserveReqID(t *testing.T) {
+	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
+	session, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("StartLevel: %v", err)
+	}
+	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10002, "play-1"); !errors.Is(err, ErrInsufficientResource) {
+		t.Fatalf("failed PlayCard error = %v, want ErrInsufficientResource", err)
+	}
+	if current := svc.sessions[session.SessionID].state.Resources["bread"]; current != 0 {
+		t.Fatalf("failed PlayCard left partial state, bread = %d", current)
+	}
+
+	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, "play-1"); err != nil {
+		t.Fatalf("retry after failed PlayCard: %v", err)
+	}
+}
+
 func TestSettleLevelRejectsIncompleteLevel(t *testing.T) {
 	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
 	session, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
@@ -133,6 +245,62 @@ func TestSettleLevelRejectsIncompleteLevel(t *testing.T) {
 	_, err = svc.SettleLevel(context.Background(), "u1", session.SessionID, "settle-1")
 	if err == nil {
 		t.Fatalf("expected incomplete level error")
+	}
+}
+
+func TestSettleLevelKeepsSessionUnsettledWhenRewardTransactionFails(t *testing.T) {
+	players := &fakePlayerRepo{failNextGrant: true}
+	svc := newTestBattleService(t, players, &fakeInventoryRepo{})
+	session, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("StartLevel returned error: %v", err)
+	}
+	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, "play-1"); err != nil {
+		t.Fatalf("PlayCard returned error: %v", err)
+	}
+
+	if _, err := svc.SettleLevel(context.Background(), "u1", session.SessionID, "settle-1"); err == nil {
+		t.Fatal("expected reward transaction error")
+	}
+	if rs := svc.sessions[session.SessionID]; rs.state.Settled || rs.settleResult != nil {
+		t.Fatalf("failed transaction marked session settled: %+v", rs.state)
+	}
+
+	result, err := svc.SettleLevel(context.Background(), "u1", session.SessionID, "settle-1")
+	if err != nil {
+		t.Fatalf("retry SettleLevel returned error: %v", err)
+	}
+	if !result.OK || players.player.Gold != 28 {
+		t.Fatalf("unexpected retry result=%+v gold=%d", result, players.player.Gold)
+	}
+}
+
+func TestDeletePlayerRuntimeRemovesOnlyTargetPlayer(t *testing.T) {
+	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
+	first, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("start u1: %v", err)
+	}
+	second, err := svc.StartLevel(context.Background(), "u2", 1, "start-2")
+	if err != nil {
+		t.Fatalf("start u2: %v", err)
+	}
+
+	if deleted := svc.DeletePlayerRuntime("u1"); deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+	if _, err := svc.PlayCard(context.Background(), "u1", first.SessionID, 10001, "play-1"); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("u1 play error = %v, want ErrSessionNotFound", err)
+	}
+	if _, err := svc.PlayCard(context.Background(), "u2", second.SessionID, 10001, "play-2"); err != nil {
+		t.Fatalf("u2 runtime was removed: %v", err)
+	}
+	restarted, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("restart u1 after runtime deletion: %v", err)
+	}
+	if restarted.SessionID == first.SessionID {
+		t.Fatal("start idempotency record was not removed with player runtime")
 	}
 }
 
@@ -150,15 +318,29 @@ func newTestBattleService(t *testing.T, players repo.PlayerRepository, inventory
 		t.Fatalf("NewCatalog returned error: %v", err)
 	}
 	data, err := gamedata.NewGameData(
-		[]gamedata.CardConfig{{
-			CardID:   10001,
-			Key:      "wheat_bag",
-			Name:     "小麦袋",
-			Rarity:   "N",
-			CardType: "material",
-			Cost:     1,
-			Effects:  []gamedata.EffectConfig{{EffectType: "gain_resource", Resource: "bread", Value: 2}},
-		}},
+		[]gamedata.CardConfig{
+			{
+				CardID:   10001,
+				Key:      "wheat_bag",
+				Name:     "小麦袋",
+				Rarity:   "N",
+				CardType: "material",
+				Cost:     1,
+				Effects:  []gamedata.EffectConfig{{EffectType: "gain_resource", Resource: "bread", Value: 2}},
+			},
+			{
+				CardID:   10002,
+				Key:      "failed_combo",
+				Name:     "失败组合",
+				Rarity:   "N",
+				CardType: "material",
+				Cost:     1,
+				Effects: []gamedata.EffectConfig{
+					{EffectType: "gain_resource", Resource: "bread", Value: 1},
+					{EffectType: "convert_resource", Resource: "wood", Value: 1, ToResource: "bread", ToValue: 1},
+				},
+			},
+		},
 		[]gamedata.OrderConfig{{
 			OrderID:      20001,
 			Key:          "white_bread",
@@ -176,7 +358,7 @@ func newTestBattleService(t *testing.T, players repo.PlayerRepository, inventory
 			OrderSlots:         1,
 			InitialOrders:      1,
 			Goal:               gamedata.LevelGoal{GoalType: "complete_orders", Target: 1},
-			FixedCards:         []int64{10001},
+			FixedCards:         []int64{10001, 10002},
 			OrderPool:          []gamedata.OrderPoolEntry{{OrderID: 20001, Weight: 100}},
 			FirstClearRewards: []gamedata.RewardConfig{
 				{ItemID: gamedata.ItemIDGold, Count: 20},

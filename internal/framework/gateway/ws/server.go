@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,8 +33,10 @@ type Options struct {
 	SendQueueSize   int
 	InboundMinGap   time.Duration
 	MaxMessageBytes int64
+	AllowedOrigins  []string
 	Codec           EnvelopeCodec
 	BizHandler      BizHandler
+	OnSessionBound  func(ctx context.Context, uid string, connID string) error
 	OnDisconnect    func(ctx context.Context, uid string, connID string)
 	OnRestoreState  func(ctx context.Context, uid string) (map[string]interface{}, bool)
 	Metrics         *metrics.Registry
@@ -45,14 +49,6 @@ type BizHandler interface {
 	Handle(ctx context.Context, uid string, opCode int32, payload json.RawMessage) (interface{}, *terrors.BizError)
 }
 
-type messagePriority int
-
-const (
-	priorityHigh messagePriority = iota
-	priorityNormal
-	priorityLow
-)
-
 type Server struct {
 	Addr           string
 	NodeID         string
@@ -62,6 +58,7 @@ type Server struct {
 	sessionManager session.Manager
 	heartbeat      HeartbeatConfig
 	bizHandler     BizHandler
+	onSessionBound func(ctx context.Context, uid string, connID string) error
 	onDisconnect   func(ctx context.Context, uid string, connID string)
 	onRestoreState func(ctx context.Context, uid string) (map[string]interface{}, bool)
 	metrics        *metrics.Registry
@@ -79,6 +76,11 @@ type Server struct {
 
 	mu      sync.RWMutex
 	clients map[string]*Client
+	sockets map[*websocket.Conn]struct{}
+
+	handlerMu sync.Mutex
+	stopping  bool
+	handlerWG sync.WaitGroup
 }
 
 func NewServer(opts Options) *Server {
@@ -114,6 +116,7 @@ func NewServer(opts Options) *Server {
 		sessionManager:  opts.SessionManager,
 		heartbeat:       opts.Heartbeat,
 		bizHandler:      opts.BizHandler,
+		onSessionBound:  opts.OnSessionBound,
 		onDisconnect:    opts.OnDisconnect,
 		onRestoreState:  opts.OnRestoreState,
 		metrics:         opts.Metrics,
@@ -122,12 +125,35 @@ func NewServer(opts Options) *Server {
 		inboundLimiter:  limiter,
 		maxMessageBytes: opts.MaxMessageBytes,
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: buildOriginChecker(opts.AllowedOrigins),
 		},
 		clients: make(map[string]*Client),
+		sockets: make(map[*websocket.Conn]struct{}),
 	}
 	s.drainMode.Store(opts.DrainMode)
 	return s
+}
+
+// buildOriginChecker 允许原生客户端无 Origin 连接，浏览器连接必须命中配置白名单。
+func buildOriginChecker(allowedOrigins []string) func(*http.Request) bool {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		origin = strings.TrimSpace(origin)
+		if origin != "" {
+			allowed[origin] = struct{}{}
+		}
+	}
+	return func(r *http.Request) bool {
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if origin == "" {
+			return true
+		}
+		if _, ok := allowed["*"]; ok {
+			return true
+		}
+		_, ok := allowed[origin]
+		return ok
+	}
 }
 
 func (s *Server) Start(ctx context.Context) error {
@@ -146,10 +172,16 @@ func (s *Server) Start(ctx context.Context) error {
 		Addr:    s.Addr,
 		Handler: mux,
 	}
+	listener, err := net.Listen("tcp", s.Addr)
+	if err != nil {
+		return fmt.Errorf("listen ws %s: %w", s.Addr, err)
+	}
+	s.Addr = listener.Addr().String()
+	s.httpSrv.Addr = s.Addr
 
 	go func() {
 		ilog.Infof("ws server listening on %s", s.Addr)
-		if err := s.httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := s.httpSrv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			ilog.Errorf("ws server stopped with error: %v", err)
 		}
 	}()
@@ -157,41 +189,72 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 func (s *Server) Stop(ctx context.Context) error {
+	s.SetDrainMode(true)
+	s.handlerMu.Lock()
+	s.stopping = true
+	s.handlerMu.Unlock()
+
+	var firstErr error
+	if s.httpSrv != nil {
+		if err := s.httpSrv.Shutdown(ctx); err != nil {
+			firstErr = err
+		}
+	}
+
 	s.mu.Lock()
 	for _, c := range s.clients {
 		c.Close()
 	}
-	s.clients = make(map[string]*Client)
-	s.mu.Unlock()
-	if s.httpSrv == nil {
-		return nil
+	for conn := range s.sockets {
+		_ = conn.Close()
 	}
-	return s.httpSrv.Shutdown(ctx)
+	s.clients = make(map[string]*Client)
+	s.sockets = make(map[*websocket.Conn]struct{})
+	s.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		s.handlerWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return firstErr
+	case <-ctx.Done():
+		if firstErr != nil {
+			return firstErr
+		}
+		return ctx.Err()
+	}
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
-	if s.IsDrainMode() || s.connections.Load() >= int64(s.MaxConnections) {
+	if s.IsDrainMode() || !s.tryAcquireConnection() {
 		s.writeServerFullHTTP(w)
 		return
 	}
+	if !s.beginHandler() {
+		s.connections.Add(-1)
+		s.writeServerFullHTTP(w)
+		return
+	}
+	defer s.handlerWG.Done()
+	s.observeConnections()
+	defer func() {
+		s.connections.Add(-1)
+		s.observeConnections()
+	}()
 
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
-	s.connections.Add(1)
-	s.observeConnections()
-	defer func() {
-		s.connections.Add(-1)
-		s.observeConnections()
-		_ = conn.Close()
-	}()
+	s.addSocket(conn)
+	defer s.removeSocket(conn)
+	defer conn.Close()
 
 	conn.SetReadLimit(s.maxMessageBytes)
 	_ = conn.SetReadDeadline(time.Now().Add(s.heartbeat.PongWait))
-	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(s.heartbeat.PongWait))
-	})
 
 	uid, connID, client, ok := s.authenticate(r.Context(), conn)
 	if !ok {
@@ -199,6 +262,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() {
 		_ = s.sessionManager.Unbind(context.Background(), uid, connID)
+		if s.inboundLimiter != nil {
+			s.inboundLimiter.Delete(connID + ":biz")
+		}
 		s.removeClient(connID)
 		if s.onDisconnect != nil {
 			s.onDisconnect(context.Background(), uid, connID)
@@ -218,6 +284,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
+		// 任意合法协议都代表连接仍然活跃；空闲连接由客户端业务心跳续期。
+		_ = conn.SetReadDeadline(time.Now().Add(s.heartbeat.PongWait))
 
 		switch req.Type {
 		case dto.TypeHeartbeatReq:
@@ -336,15 +404,7 @@ func (s *Server) authenticate(ctx context.Context, conn *websocket.Conn) (uid st
 		return "", "", nil, false
 	}
 
-	cnt, err := s.sessionManager.Count(ctx)
-	if err != nil {
-		if s.metrics != nil {
-			s.metrics.IncWSAuthFailed()
-		}
-		_ = s.writeErrorConn(conn, first.Seq, terrors.CodeInternal, "session count failed")
-		return "", "", nil, false
-	}
-	if s.IsDrainMode() || cnt >= s.MaxConnections {
+	if s.IsDrainMode() {
 		if s.metrics != nil {
 			s.metrics.IncWSAuthFailed()
 		}
@@ -353,19 +413,36 @@ func (s *Server) authenticate(ctx context.Context, conn *websocket.Conn) (uid st
 	}
 
 	connID = uuid.NewString()
-	oldConnID, err := s.sessionManager.Bind(ctx, session.Session{
+	oldConnID, accepted, err := s.sessionManager.BindWithinLimit(ctx, session.Session{
 		UID:      claims.UID,
 		ConnID:   connID,
 		LoginAt:  time.Now(),
 		LastSeen: time.Now(),
 		ClientIP: "",
-	})
+	}, s.MaxConnections)
 	if err != nil {
 		if s.metrics != nil {
 			s.metrics.IncWSAuthFailed()
 		}
 		_ = s.writeErrorConn(conn, first.Seq, terrors.CodeInternal, "session bind failed")
 		return "", "", nil, false
+	}
+	if !accepted {
+		if s.metrics != nil {
+			s.metrics.IncWSAuthFailed()
+		}
+		_ = s.writeServerFullWS(conn, first.Seq)
+		return "", "", nil, false
+	}
+	if s.onSessionBound != nil {
+		if err := s.onSessionBound(ctx, claims.UID, connID); err != nil {
+			_ = s.sessionManager.Unbind(context.Background(), claims.UID, connID)
+			if s.metrics != nil {
+				s.metrics.IncWSAuthFailed()
+			}
+			_ = s.writeErrorConn(conn, first.Seq, terrors.CodeInternal, "claim player owner failed")
+			return "", "", nil, false
+		}
 	}
 
 	client = NewClient(connID, claims.UID, conn, s.sendQueueSize, s.heartbeat.WriteWait, s.codec)
@@ -421,6 +498,28 @@ func (s *Server) removeClient(connID string) {
 	delete(s.clients, connID)
 }
 
+func (s *Server) addSocket(conn *websocket.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sockets[conn] = struct{}{}
+}
+
+func (s *Server) removeSocket(conn *websocket.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sockets, conn)
+}
+
+func (s *Server) beginHandler() bool {
+	s.handlerMu.Lock()
+	defer s.handlerMu.Unlock()
+	if s.stopping {
+		return false
+	}
+	s.handlerWG.Add(1)
+	return true
+}
+
 func (s *Server) kickClient(connID string, reason string) {
 	s.mu.RLock()
 	client := s.clients[connID]
@@ -446,6 +545,15 @@ func (s *Server) kickClient(connID string, reason string) {
 		return
 	}
 	client.Close()
+}
+
+// KickUID 关闭当前节点中指定玩家的连接。
+func (s *Server) KickUID(ctx context.Context, uid string, reason string) {
+	current, ok, err := s.sessionManager.GetByUID(ctx, uid)
+	if err != nil || !ok {
+		return
+	}
+	s.kickClient(current.ConnID, reason)
 }
 
 func (s *Server) writeServerFullHTTP(w http.ResponseWriter) {
@@ -496,32 +604,12 @@ func (s *Server) enqueueEnvelope(client *Client, env dto.Envelope) bool {
 		return true
 	}
 
-	switch priorityByType(env.Type) {
-	case priorityLow:
-		ilog.Infof("drop low-priority message uid=%s conn=%s type=%s", client.UID, client.ConnID, env.Type)
-		if s.metrics != nil {
-			s.metrics.IncWSQueueDrop()
-		}
-		return true
-	default:
-		ilog.Errorf("send queue full uid=%s conn=%s type=%s", client.UID, client.ConnID, env.Type)
-		if s.metrics != nil {
-			s.metrics.IncWSQueueKick()
-		}
-		client.Close()
-		return false
+	ilog.Errorf("send queue full uid=%s conn=%s type=%s", client.UID, client.ConnID, env.Type)
+	if s.metrics != nil {
+		s.metrics.IncWSQueueKick()
 	}
-}
-
-func priorityByType(msgType string) messagePriority {
-	switch msgType {
-	case dto.TypePush:
-		return priorityLow
-	case dto.TypeBizAck:
-		return priorityNormal
-	default:
-		return priorityHigh
-	}
+	client.Close()
+	return false
 }
 
 func (s *Server) writeEnvelopeConn(conn *websocket.Conn, env dto.Envelope) error {
@@ -545,8 +633,25 @@ func (s *Server) IsDrainMode() bool {
 	return s.drainMode.Load()
 }
 
+// ConnectionCount 返回当前已预占的 WebSocket 连接槽位数量。
+func (s *Server) ConnectionCount() int {
+	return int(s.connections.Load())
+}
+
 func (s *Server) observeConnections() {
 	if s.metrics != nil {
 		s.metrics.SetWSConnections(s.connections.Load())
+	}
+}
+
+func (s *Server) tryAcquireConnection() bool {
+	for {
+		current := s.connections.Load()
+		if current >= int64(s.MaxConnections) {
+			return false
+		}
+		if s.connections.CompareAndSwap(current, current+1) {
+			return true
+		}
 	}
 }

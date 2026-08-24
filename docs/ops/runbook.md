@@ -1,11 +1,17 @@
 # Runbook
 
 ## 1. Start Service
-- `GAME_CONFIG=configs/config.local.yaml go run ./cmd/gameserver`
+- 先确认共享 Redis 可用：`redis-cli -h 127.0.0.1 -p 6379 ping`
+- `GAME_CONFIG=configs/config.local.yaml GAME_TICKET_SECRET=local-dev-ticket-secret go run ./cmd/gameserver`
+- 本地配置只启动 `node-a`，但运行时仍会注册到 Redis，LoginService 不使用静态单节点列表。
+- 本地配置允许不校验管理 Token；staging/prod 启动前必须设置 `GAME_ADMIN_TOKEN`，否则服务拒绝启动。
+- 本地 `ws.allowed_origins: ["*"]` 只用于开发；staging/prod 接入 Web 客户端前必须配置准确的 `https://域名`，原生客户端无 `Origin` 不受此项影响。
+- 该启动方式只用于单节点 Demo。增加第二个 GameServer 前先拆出独立单实例 LoginServer；之后每个纯 GameServer 使用唯一的 `server.node_id` 和客户端可访问的 `server.advertised_ws_addr`，并连接同一个 Redis。
+- 正式环境中的 Redis 地址和 `advertised_ws_addr` 必须由部署配置覆盖，不能沿用仓库内的本地地址。
 
 ## 2. Baseline Smoke
 - `curl http://127.0.0.1:8080/healthz`
-- `curl http://127.0.0.1:8080/metricsz`
+- `curl http://127.0.0.1:8080/metricsz -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}"`
 - `curl -X POST http://127.0.0.1:8080/api/login -H 'Content-Type: application/json' -d '{"account":"u1001","password":"x","client_ip":"127.0.0.1","client_ver":"1.0.0"}'`
 - `go run ./scripts/loadtest/ws_auth_smoke.go`
 - `go run ./scripts/loadtest/ws_biz_smoke`
@@ -58,7 +64,6 @@
 - `ws_auth_success`
 - `ws_auth_failed`
 - `ws_rate_limited`
-- `ws_queue_drop`
 - `ws_queue_kick`
 - `flush_enqueued`
 - `flush_queue_len`
@@ -81,12 +86,13 @@
 - service process keeps running (no crash)
 
 ## 6. Drain
+- staging/prod 的 `/admin/*` 和 `/metricsz` 请求都必须携带 `Authorization: Bearer ${GAME_ADMIN_TOKEN}`；本地配置关闭校验时该请求头可省略。
 - Enable drain mode at runtime:
-- `curl -X POST http://127.0.0.1:8080/admin/drain -H 'Content-Type: application/json' -d '{"enabled":true}'`
+- `curl -X POST http://127.0.0.1:8080/admin/drain -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}" -H 'Content-Type: application/json' -d '{"enabled":true}'`
 - Check drain state:
-- `curl http://127.0.0.1:8080/admin/drain`
+- `curl http://127.0.0.1:8080/admin/drain -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}"`
 - Check active sessions:
-- `curl http://127.0.0.1:8080/admin/sessions`
+- `curl http://127.0.0.1:8080/admin/sessions -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}"`
 - During drain:
 - new WS connections/auth should receive `SERVER_FULL`
 - existing sessions continue until client disconnect or server stop
@@ -98,4 +104,4 @@
 - Restore previous config
 - Restart and verify:
 - `curl http://127.0.0.1:8080/healthz`
-- `curl http://127.0.0.1:8080/metricsz`
+- `curl http://127.0.0.1:8080/metricsz -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}"`

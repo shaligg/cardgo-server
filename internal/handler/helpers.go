@@ -37,6 +37,7 @@ func isInvalidRequestError(err error) bool {
 		errors.Is(err, assetsvc.ErrBatchNotSupported) ||
 		errors.Is(err, assetsvc.ErrUnsupportedStorage) ||
 		errors.Is(err, battlesvc.ErrInvalidReqID) ||
+		errors.Is(err, battlesvc.ErrReqIDConflict) ||
 		errors.Is(err, battlesvc.ErrCardNotInSession) ||
 		errors.Is(err, cardsvc.ErrInvalidDeck)
 }

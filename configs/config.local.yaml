@@ -4,6 +4,7 @@ server:
   api_port: 8080
   ws_host: "0.0.0.0"
   ws_port: 8081
+  advertised_ws_addr: "ws://127.0.0.1:8081/ws"
   max_connections: 2000
   drain_mode: false
   dispatcher_shards: 64
@@ -17,6 +18,10 @@ auth:
   nonce_ttl_sec: 120
   secret_env_key: "GAME_TICKET_SECRET"
 
+admin:
+  require_auth: false
+  token_env_key: "GAME_ADMIN_TOKEN"
+
 ws:
   heartbeat_interval_sec: 30
   pong_wait_sec: 60
@@ -24,16 +29,36 @@ ws:
   send_queue_size: 256
   biz_min_gap_ms: 5
   max_message_bytes: 65536
+  allowed_origins: ["*"]
 
 db:
   dsn: "file:game_demo.db?cache=shared&_busy_timeout=5000"
+
+redis:
+  addr: "127.0.0.1:6379"
+  password_env_key: "GAME_REDIS_PASSWORD"
+  db: 0
+  node_key_prefix: "game:gameserver"
+  player_owner_key_prefix: "game:player_owner"
+  node_heartbeat_sec: 5
+  node_ttl_sec: 15
 
 cache:
   l1_ttl_sec: 30
   l2_ttl_sec: 300
 
+state:
+  offline_ttl_sec: 120
+  cleanup_interval_sec: 10
+  owner_check_interval_sec: 5
+  owner_ttl_sec: 120
+
 debug:
   enable_ws_debug_ops: true
+
+web_search:
+  base_url: "https://zh.wikipedia.org/w/api.php"
+  timeout_ms: 2000
 
 gamedata:
   item_config_path: "configs/gamedata/items.json"

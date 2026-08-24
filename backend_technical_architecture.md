@@ -37,9 +37,9 @@
 6. `globalcore/globalserver` 只建立代码边界，完整公共玩法业务以后续范围文档为准。
 
 ## 1. 文档目标
-- 给出单节点（单进程）可落地的游戏服架构方案。
-- 目标承载：单服稳定 `2000` 在线。
-- 约束：当前登录能力先内置同进程模块（逻辑独立），后续可独立拆分。
+- 给出单个 GameServer 节点可落地、可水平增加多个节点的游戏服架构方案。
+- 目标承载：每个 GameServer 稳定 `2000` 在线，登录模块始终通过共享节点注册表分配节点。
+- 约束：单节点 Demo 将 Login 内置同进程；扩展第二个 GameServer 前，Login 必须拆成独立单进程服务。
 - 方法：先模块化单体，后续按瓶颈平滑拆分。
 - 实现策略：同进程部署、按多服务边界编码（接口先行），优先交付可用 Demo。
 - 业务目标：支撑卡牌休闲游戏 MVP 主链路，即登录、建号、进入关卡、完成订单、结算奖励、卡牌成长、工坊成长。
@@ -48,11 +48,12 @@
 ## 2. 架构结论
 1. 形态：模块化单体（非微服务），一个 `GameServer` 进程承载实时链路。
 2. 职责划分：
-- 登录模块（同进程）：认证、分配节点、发放 ticket。
+- 登录模块（Demo 同进程，多 GameServer 时独立单进程）：认证、分配节点、发放 ticket。
 - 游戏服：验票接入、会话管理、卡牌/订单/工坊等实时业务、状态持久化。
 3. 设计边界：
 - 逻辑按“多服务”划分（login/realtime/state/cache/repo），部署按“单进程”落地。
 - 模块之间只走接口与 DTO，不直接引用内部实现，预留远程化替换点。
+- 每个 GameServer 进程启动后都把自身节点状态注册到 Redis；独立 LoginServer 不注册为游戏节点。本地配置只有一个节点，不使用另一套静态单节点运行逻辑。
 4. 数据访问链路：
 - `Service -> CachedRepository -> Repository -> Model -> DB`
 5. 状态分层：
@@ -64,7 +65,7 @@
 - `AccessGateway` 不进入 MVP 主链路，只作为未来统一入口、隐藏源站或安全防护的演进方案。
 
 ## 3. 边界定义
-1. 登录、账号、选服由 `login` 逻辑模块负责，当前与游戏服同进程部署。
+1. 登录、账号、选服由 `login` 逻辑模块负责；单节点 Demo 与游戏服同进程，多 GameServer 部署时必须独立为单实例 LoginServer。
 2. `login` 与 `realtime` 通过接口边界交互，不直接共享内部实现细节。
 3. GM 后台为独立系统，不进入实时主链路。
 4. 当前阶段不引入策划分服逻辑；只保留性能扩容能力。
@@ -75,7 +76,7 @@
 ## 4. 总体架构
 ```text
 Client
-  -> Login API(当前可与 GameServer 同进程部署)
+  -> Login API(Demo 与 GameServer 同进程；多 GameServer 时独立部署)
       - login service
       - node allocator
       - ticket issuer
@@ -198,9 +199,9 @@ Client -> AccessGateway ==少量内网复用连接==> GameServer
 3. 主读写链路保持 `Service -> CachedRepository -> Repository -> DB`。
 
 ## 5. 核心模块职责
-### 5.1 login（同进程逻辑模块）
+### 5.1 login（Demo 同进程，多 GameServer 时独立进程）
 - 账号认证（当前阶段）
-- 分配节点（当前单节点返回本节点；后续多节点按策略分配）
+- 从 Redis 节点注册表读取全部存活 GameServer，并按重连偏好和负载策略分配节点
 - 签发 `enter_ticket`
 - 对外暴露登录 API（便于后续独立拆分）
 
@@ -309,7 +310,7 @@ MVP:
 
 | 模块 | 当前位置 | 未来可能位置 | 实现要求 | MVP 要求 |
 |---|---|---|---|---|
-| `login` | `internal/platform/login` | 独立 LoginServer | 接口化，ticket/allocator DTO 稳定 | 当前同进程 HTTP |
+| `login` | `internal/platform/login` | 独立单实例 LoginServer | 接口化，ticket/allocator DTO 稳定 | 单节点 Demo 同进程；增加 GameServer 前先拆启动入口 |
 | `globalcore/rank` | GameServer 同进程 | 独立 RankService 或 GlobalServer 复用 | `RankService` 接口，支持 `LocalRankService` 与 `RemoteRankClient`；排行奖励规则也放这里复用 | 可先本地实现 |
 | `globalcore/mail` | GameServer 同进程 | 独立 MailService 或 GlobalServer 复用 | 接口化，发放/领取幂等，附件持久化，批量邮件规则可复用 | 可先占位或简化 |
 | `globalcore/chat` | GameServer 同进程 | 独立 ChatService 或 GlobalServer 复用 | 接口化，不依赖本机连接对象，消息可持久化或短期缓存 | MVP 可只占位 |
@@ -615,7 +616,7 @@ Client -> GameServer gateway/ws: auth_req(new enter_ticket)
 4. 客户端连接游戏服后首帧必须 `auth(ticket)`。
 5. GameServer 校验 `ticket.server_id` 必须等于自身 `server_id`。
 6. GameServer 验票成功后创建会话并返回 `auth_ok`。
-7. 达到上限返回 `SERVER_FULL`（单节点 Demo 默认 `candidates=[]`）。
+7. 目标 GameServer 达到硬上限时返回 `SERVER_FULL`；客户端重新请求 LoginService，由节点分配器选择其他可用节点。
 
 当前 MVP 不存在：
 
@@ -625,12 +626,22 @@ Client -> GameServer gateway/ws: auth_req(new enter_ticket)
 
 未来如果引入 AccessGateway，协议语义不变，但登录 API 返回的 `ws_addr` 会从 `GameServer ws_addr` 变成 `AccessGateway ws_addr`，AccessGateway 再根据 `ticket.server_id` 路由到目标 GameServer。
 
-### 6.2 enter_ticket 字段建议
+### 6.2 enter_ticket 签名契约
 - `uid`
 - `server_id`
 - `exp`
 - `nonce`
-- `sig`（JWT 或 HMAC）
+- `issuer`
+- `sig`
+
+MVP 固定使用 HMAC-SHA256：
+
+1. 票据格式为 `base64url(JSON claims).base64url(HMAC-SHA256)`，签名覆盖完整 claims 编码结果。
+2. LoginService 负责签发，GameServer 负责验签；两端从 `GAME_TICKET_SECRET` 读取同一密钥，密钥不得进入客户端或提交到配置文件。
+3. 密钥为空、算法不受支持时服务启动失败，禁止退化为无签名票据。
+4. GameServer 必须先验证签名和 `issuer`，再检查 `exp`、`server_id`，最后一次性消费 `nonce`。
+5. 修改 `uid/server_id/exp/nonce/issuer` 中任一字段都会导致签名验证失败。
+6. 正向 auth smoke 不能替代安全验收；至少覆盖错误密钥、字段篡改和 nonce 重放三个失败用例。
 
 ### 6.3 错误码建议
 - `AUTH_INVALID`
@@ -651,6 +662,8 @@ Client -> GameServer gateway/ws: auth_req(new enter_ticket)
 说明：
 
 - `NodeAllocator` 是登录服内部的节点分配模块，不是独立进程。
+- `NodeAllocator` 每次从 Redis `NodeRegistry` 读取 TTL 尚未过期的节点，不从本地静态列表选择。
+- 等负载或心跳数据短暂一致时，使用基于 UID 的稳定“两选一”策略分散突发登录；GameServer 的连接硬上限负责最终准入兜底。
 - 登录服只参与登录和重连分配，不转发后续游戏消息。
 - GameServer 不参与选服，只验证 ticket 中的 `server_id` 是否等于自己。
 
@@ -670,38 +683,41 @@ Client -> GameServer gateway/ws: auth_req(new enter_ticket)
 ### 7.4 断线流程
 1. 连接断开
 2. Session 标记离线
-3. 原 GameServer 保留在线热状态一段 TTL（建议 `5~10` 分钟）
+3. 原 GameServer 按 `state.offline_ttl_sec` 保留在线热状态一段 TTL（当前默认 `120` 秒）
 4. 关键 A 类数据仍以 DB 为准，断线时可触发 flush 或入队异步刷盘
 5. 玩家重连时由 `Login/NodeAllocator` 决定分配到哪个 GameServer
-6. 如果分配回原 GameServer，优先恢复本机内存热状态
-7. 如果分配到新 GameServer，不恢复旧服内存态，直接从 DB 重建长期状态
-8. 原 GameServer 的内存态 MVP 使用 TTL 超时清理，后续可通过迁移通知立即清理
+6. GameServer 验票并成功绑定会话后，原子更新 Redis 玩家归属 `uid -> server_id + conn_id`
+7. 如果 Redis 中的前一归属仍是本节点，优先恢复本机内存热状态
+8. 如果前一归属不是本节点或不存在，不复用本机旧状态，直接从 DB 重建长期状态
+9. 原 GameServer 复用 `FlushWorker`，按 `state.owner_check_interval_sec`（当前默认 `5` 秒）批量核对 Redis 归属；发现玩家已迁移后清理 `OnlineState/BattleSession`，不增加节点通信和独立定时器
+10. 离线归属和本机热状态另有 `120` 秒 TTL 兜底；Redis 查询失败时只记日志，不删除任何本机状态
 
 ### 7.4.1 重连分配规则
 分配规则属于 `Login/NodeAllocator`，不写死在 GameServer。
 
 推荐规则：
 
-1. 查询 `uid -> last_server_id` 或 `session_index.server_id`。
+1. 查询 Redis `player_owner:{uid}.server_id`。
 2. 如果原 server 健康、未满载、非 drain，优先分配回原 server。
 3. 如果原 server 不健康、满载、drain 或策略要求迁移，则分配到新 server。
 4. ticket 中写入最终 `server_id`。
 5. GameServer 只验证 ticket 是否属于自己，不决定玩家该去哪个服。
 
-MVP 实现说明：
+当前实现说明：
 
-1. 当前可在 `LoginService` 发票成功后记录 `uid -> server_id`，表示“最近分配节点”。
-2. 这个记录用于下一次登录/重连时优先尝试原 GameServer。
-3. 记录失败不阻断登录主链路，避免会话索引短暂异常影响玩家进入。
-4. 更严格的生产增强方案是在 GameServer 首帧鉴权成功后记录 `uid -> server_id`，表示“最近成功进入节点”。
-5. MVP 暂不强制引入 GameServer 鉴权成功回调，避免接入层复杂化；未来多节点部署前再替换为 Redis/DB 存储和鉴权成功写入。
+1. GameServer 节点发现已经使用共享 Redis，不存在静态单节点分配旁路。
+2. 多 GameServer 形态只部署一个独立 LoginServer，不设计多个 Login 实例的扩容场景。
+3. `PlayerOwnerStore` 使用共享 Redis；Login 只读取最近有效归属，不在签发 ticket 时写入归属。
+4. GameServer 首帧鉴权成功并绑定本地会话后才调用 `Claim`，记录“最近成功进入节点”，避免发票成功但连接失败造成假归属。
+5. 在线玩家由当前节点按 `5` 秒周期刷新归属 TTL；断线后仅在 `server_id + conn_id` 仍匹配时缩短为 `120` 秒，旧连接回调不能覆盖新连接。
+6. 跨节点在线定位、重复登录和定向推送后续可扩展为完整 `SessionIndex`；当前只实现重连偏好和旧节点状态清理所需的最小归属记录。
 
 跨服重连规则：
 
 1. 新 GameServer 从 DB 读取玩家资料、资产、卡牌、卡组、工坊、关卡进度。
 2. 不读取旧 GameServer 内存中的 `BattleSession`。
 3. 未结算局内状态视为中断，MVP 可按放弃或失败补偿处理。
-4. 原 GameServer 通过 TTL 清理旧 `OnlineState/BattleSession`。
+4. 原 GameServer 在下一轮 Redis 归属扫描中清理旧 `OnlineState/BattleSession`，TTL 只作为异常兜底。
 
 ### 7.4.2 session_id 与 conn_id 口径
 MVP 阶段不强制拆分 `session_id` 和 `conn_id`。
@@ -749,7 +765,7 @@ MVP: session_id == 当前连接 ID
 3. 跨域操作（如公会审批后发系统邮件）必须走事件编排，避免直接跨分片锁。
 4. 持久化：异步刷盘队列，批量写入 DB
 5. 广播：按房间/频道，避免高频全服广播
-6. 队列策略：消息按优先级处理，低优先级可降级或丢弃
+6. 队列策略：每连接一个有界 FIFO 队列，队列满即关闭该慢客户端
 7. 资源隔离：`login` 与 `realtime` 使用独立 worker 池与限流器，避免互相挤压。
 
 ### 8.1 事件可靠性机制（同进程先行，后续可迁移 MQ）
@@ -1050,13 +1066,11 @@ MVP 至少需要以下业务表：
 ## 10. 2000 在线容量设计
 1. 硬限制：`max_connections = 2000`
 2. 认证前后都检查连接上限
-3. 每连接独立发送队列，队列满时执行降级/踢慢客户端
-4. 消息优先级：
-- 高优先级：心跳、系统控制
-- 中优先级：业务交互
-- 低优先级：广播/非关键通知
-5. 单节点 Demo 阶段 `SERVER_FULL` 默认返回重试信息；候选节点字段可为空数组。
-6. 准入控制建议：
+3. 每连接一个独立有界 FIFO 发送队列，玩家之间互不阻塞
+4. 当前消息均属于必要响应，队列满说明客户端无法跟上服务端发送速度，直接关闭该连接并由客户端重连
+5. MVP 不实现高/中/低多级队列；未来出现允许丢弃的广播或非关键 Push 后，再按真实需求增加独立低优先级队列
+6. 单个 GameServer 满载时返回 `SERVER_FULL`；客户端重新请求 LoginService，节点分配器避开已上报满载的节点。
+7. 准入控制建议：
 - 新连接速率限制（防连接风暴）
 - 登录接口限流与接入限流分开配置
 
@@ -1078,13 +1092,22 @@ MVP 至少需要以下业务表：
 
 ## 12. 安全与风控
 1. ticket 使用 JWT/HMAC，TTL 建议 `30~120s`
-2. nonce Redis 一次性消费，防重放
+2. 当前 nonce 在 GameServer 进程内一次性消费；未来拆分 Login/GameServer 或需要跨节点验票时再迁移 Redis
 3. 全链路 WSS
 4. 统一风控：IP/UID 限流、消息体大小限制、异常行为拦截
-5. Redis 故障策略：
-- 默认 `fail-close`：新登录与新鉴权拒绝，已在线会话继续服务
-- 启用熔断与快速失败，避免阻塞实时线程
-- 故障恢复后逐步放开登录流量（渐进恢复）
+5. WebSocket Origin：无 `Origin` 的原生客户端允许连接；浏览器请求必须命中 `ws.allowed_origins`，`*` 只允许本地开发使用
+6. 管理接口保护：
+- `/admin/*` 和 `/metricsz` 统一使用 `Authorization: Bearer <token>` 校验
+- 本地 Demo 可通过配置关闭；staging/prod 必须开启，且 Token 只从环境变量读取
+- 开启校验但环境变量为空时，GameServer 必须启动失败，不能退化为公开接口
+- `/healthz` 和 `/api/login` 保持公开，不受管理 Token 影响
+7. Redis 故障策略：
+- 启动时 Redis 连接或首次节点注册失败，GameServer 启动失败
+- 运行中节点列表读取失败时 LoginService 返回错误，不使用静态节点旁路
+- 新连接写入玩家归属失败时拒绝建立游戏会话，避免多个节点同时持有有效状态
+- 已在线玩家继续服务；归属查询失败时保留本机热状态，不因“查不到”误清理
+- 节点心跳失败只记录错误，下一周期继续上报；Redis 恢复后自动重新注册，无需重启 GameServer
+- 当前 nonce/session 未使用 Redis，不为尚不存在的远端实现增加熔断或降级代码
 
 ## 13. 高可用与扩展准备
 1. 支持 `drain` 模式：维护时拒绝新连接，保留存量会话
@@ -1331,8 +1354,11 @@ go_game_server/
 ```yaml
 server:
   node_id: "node-a"
+  api_host: "0.0.0.0"
+  api_port: 8080
   ws_host: "0.0.0.0"
   ws_port: 8081
+  advertised_ws_addr: "ws://127.0.0.1:8081/ws"
   max_connections: 2000
   drain_mode: false
 
@@ -1343,6 +1369,10 @@ auth:
   nonce_ttl_sec: 120
   secret_env_key: "GAME_TICKET_SECRET"
 
+admin:
+  require_auth: false
+  token_env_key: "GAME_ADMIN_TOKEN"
+
 ws:
   read_buffer_size: 4096
   write_buffer_size: 4096
@@ -1351,6 +1381,7 @@ ws:
   write_wait_sec: 10
   send_queue_size: 256
   max_message_bytes: 65536
+  allowed_origins: ["*"] # 仅本地开发；staging/prod 配置明确域名或保持空列表
 
 dispatcher:
   shard_count: 64
@@ -1372,9 +1403,16 @@ redis:
   addr: "127.0.0.1:6379"
   password_env_key: "GAME_REDIS_PASSWORD"
   db: 0
-  pool_size: 64
-  min_idle_conns: 16
-  timeout_ms: 2000
+  node_key_prefix: "game:gameserver"
+  player_owner_key_prefix: "game:player_owner"
+  node_heartbeat_sec: 5
+  node_ttl_sec: 15
+
+state:
+  offline_ttl_sec: 120
+  cleanup_interval_sec: 10
+  owner_check_interval_sec: 5
+  owner_ttl_sec: 120
 
 gamedata:
   dir: "./configs/gamedata"
@@ -1413,7 +1451,10 @@ MVP 阶段至少需要以下配置：
 ```go
 package login
 
-import "context"
+import (
+    "context"
+    "time"
+)
 
 type LoginRequest struct {
 	Account   string
@@ -1452,8 +1493,17 @@ type NodeRegistry interface {
 	ListNodes(ctx context.Context) ([]NodeInfo, error)
 }
 
-type LastServerStore interface {
+type NodeRegistrar interface {
+    UpsertNode(ctx context.Context, node NodeInfo, ttl time.Duration) error
+    RemoveNode(ctx context.Context, serverID string) error
+}
+
+type PlayerOwnerStore interface {
+	Claim(ctx context.Context, uid string, serverID string, connID string, ttl time.Duration) (previousServerID string, err error)
+	MarkOffline(ctx context.Context, uid string, serverID string, connID string, ttl time.Duration) error
 	GetLastServerID(ctx context.Context, uid string) (serverID string, ok bool, err error)
+	GetOwners(ctx context.Context, uids []string) (map[string]PlayerOwner, error)
+	RefreshOwned(ctx context.Context, serverID string, uids []string, ttl time.Duration) error
 }
 
 type TicketIssuer interface {
@@ -1464,9 +1514,12 @@ type TicketIssuer interface {
 实现约束：
 
 1. `NodeAllocator` 是登录服务进程内模块，不是独立服务进程。
-2. MVP 使用静态 `NodeRegistry` 注册当前 GameServer；多节点阶段替换为 Redis/DB/服务发现实现。
-3. `LastServerStore` 用于重连优先原服；MVP 可用内存实现，多节点阶段必须使用 Redis/DB 等共享存储。
-4. `LoginService` 只负责认证、分配和发票，不转发游戏消息。
+2. 当前运行链路固定使用 Redis `NodeRegistry`；每个 GameServer 启动后注册自己，按周期上报连接数、容量、健康和 drain 状态，停止时主动注销，异常退出时由 TTL 自动剔除。
+3. 本地环境只是 Redis 中只有 `node-a` 一条存活记录，不允许为本地环境切回静态分配器。
+4. `node_id` 和 `advertised_ws_addr` 必须在节点间唯一且可被客户端访问；监听地址 `ws_host/ws_port` 与对外地址不能混为一项配置。
+5. `PlayerOwnerStore` 使用共享 Redis：Login 只调用 `GetLastServerID` 做原节点优先；GameServer 负责 `Claim/MarkOffline/RefreshOwned` 和批量归属核对。
+6. 分配策略不能在等负载时固定选择同一个 server_id，必须避免节点心跳间隔内的突发登录惊群。
+7. `LoginService` 只负责认证、分配和发票，不转发游戏消息。
 
 ### 18.2 Auth
 ```go
@@ -1783,11 +1836,12 @@ type GlobalJobResult struct {
 5. 未来独立部署时，transport 层只做协议转换，不改变接口语义。
 
 ## 19. 协议定义（Login API + WebSocket）
-### 19.1 Login API（同进程模块，对外 HTTP）
+### 19.1 Login API（Demo 同进程，多 GameServer 时独立服务）
 `POST /api/login`
 
 说明：
 - Demo 阶段该 API 与游戏服同进程同仓库。
+- 扩展第二个 GameServer 前，增加独立 LoginServer 启动入口；多个 GameServer 不再各自对外提供 Login API。
 - Demo 阶段该 API 可以直接用 `account` 简化账号校验，并一次性完成选服和发 `enter_ticket`。
 - 正式版本建议把账号登录态和 GameServer 入场票拆开：
 - `POST /api/login`：账号登录，返回 `account_token/refresh_token`。
@@ -1845,6 +1899,25 @@ type GlobalJobResult struct {
 | `error` | S -> C | 错误消息 |
 | `kick` | S -> C | 踢线 |
 | `server_full` | S -> C | 超限重定向 |
+
+### 19.3.1 业务心跳与连接超时
+
+MVP 只使用协议 Envelope 中的业务心跳，不再额外维护一套 WebSocket Ping/Pong 存活机制：
+
+1. 客户端按约定周期发送 `heartbeat_req`，服务端返回相同 `seq` 的 `heartbeat_ack`。
+2. GameServer 在认证成功后设置连接读期限；后续每次成功解析任意合法 Envelope 后重新设置读期限。
+3. `heartbeat_req`、`biz_req` 等合法消息都代表连接仍然活跃；玩家持续操作时不依赖额外心跳续期。
+4. JSON/Envelope 解析失败、缺少必要字段等非法消息不刷新读期限，避免攻击者用垃圾流量长期占用连接。
+5. 连续 `pong_wait_sec` 未收到合法消息时关闭连接，客户端重新向 LoginService 获取 `enter_ticket` 后建立新连接。
+6. Gorilla WebSocket 仍按协议自动回复收到的 Ping 控制帧，但底层 Ping/Pong 不刷新业务读期限，也不作为 MVP 存活判断依据。
+7. 客户端心跳周期必须明显小于服务端超时，推荐 `20s/60s` 或 `30s/90s`，避免单次心跳丢失触发重连。
+
+心跳验收必须覆盖：
+
+- 持续业务消息超过两倍超时时间，连接保持。
+- 无业务但持续业务心跳超过两倍超时时间，连接保持。
+- 无合法消息超过超时时间，连接关闭。
+- 持续发送非法消息不能阻止连接超时。
 
 ### 19.4 关键消息样例
 #### auth_req
@@ -2069,12 +2142,11 @@ sequenceDiagram
         NS-->>AV: ok
         AV-->>GW: claims(uid, server_id, exp)
 
-        GW->>SM: Count()
-        alt 达到会话上限
+        GW->>SM: BindWithinLimit(session, max_connections)
+        alt 新 UID 且达到会话上限
             GW-->>C: server_full
         else 通过
-            GW->>SM: Bind(uid, session_id)
-            SM-->>GW: old_session_id(optional)
+            SM-->>GW: accepted + old_session_id(optional)
             GW->>SR: Restore(uid, server_id)
             alt 本机存在短线热状态
                 SR-->>GW: resync(from memory OnlineState/BattleSession)
@@ -2104,8 +2176,7 @@ sequenceDiagram
 | 首帧协议 | `gateway/ws` | 第一帧必须 `auth_req` | WS `error(AUTH_INVALID/BAD_REQUEST)` |
 | Ticket 验证 | `auth.Verifier` | 签名、过期、`server_id` | `AUTH_INVALID/AUTH_EXPIRED` |
 | 防重放 | `nonce store` | nonce 一次性消费 | `AUTH_REPLAY` |
-| 会话容量校验 | `session.Manager` | 当前在线数 `< max_connections` | WS `server_full` |
-| 会话绑定 | `session.Manager` | `uid -> session_id` 绑定成功 | `INTERNAL_ERROR` |
+| 会话容量与绑定 | `session.Manager` | 同一临界区内判断容量并绑定 `uid -> session_id` | WS `server_full` / `INTERNAL_ERROR` |
 
 ### 20.1.3 返回报文约束（连接创建）
 1. 登录成功返回字段：`ws_addr`、`server_id`、`enter_ticket`、`expire_at`
@@ -2248,32 +2319,38 @@ sequenceDiagram
     participant L as Login/Allocator
     participant OG as Old GameServer
     participant NG as New GameServer
+    participant R as Redis PlayerOwner
     participant S as Session
     participant ST as State
     participant DB as DB
 
     C-xOG: disconnect
     OG->>S: mark offline_pending
+    OG->>R: shorten owner TTL if server_id+conn_id match
     OG->>ST: keep OnlineState/BattleSession with TTL
     OG->>ST: enqueue flush for A-class snapshot if needed
 
     C->>L: POST /api/login(reconnect)
+    L->>R: read last server_id
     L->>L: choose server by health/load/last_server_id
 
     alt 分配回原 GameServer
         L-->>C: ticket(server_id=old)
         C->>OG: auth_req(ticket)
         OG->>S: rebind uid->new conn
+        OG->>R: claim owner after auth
         OG->>ST: restore memory OnlineState/BattleSession
         OG-->>C: auth_ack + resync(from memory)
     else 分配到新 GameServer
         L-->>C: ticket(server_id=new)
         C->>NG: auth_req(ticket)
         NG->>S: bind uid->new conn
+        NG->>R: claim owner after auth
         NG->>DB: load authoritative player state
         DB-->>NG: profile/assets/cards/deck/workshop/progress
         NG-->>C: auth_ack + resync(from DB, no old battle)
-        OG->>ST: old memory state cleaned by TTL or migration notice
+        OG->>R: batch check owner on existing state loop
+        OG->>ST: owner changed, clear old OnlineState/BattleSession
     end
 ```
 
@@ -2283,7 +2360,8 @@ sequenceDiagram
 2. GameServer 不参与选服，只验证 ticket 中的 `server_id` 是否等于自己。
 3. 回原服时可以恢复本机内存中的局内状态。
 4. 到新服时不恢复旧服局内内存态，只从 DB 重建长期权威状态。
-5. MVP 阶段旧服内存通过 TTL 清理；后续可增加迁移通知。
+5. MVP 阶段旧服复用 `FlushWorker` 每 `5` 秒批量核对 Redis 归属，TTL 作为异常兜底；不使用迁移 RPC、Pub/Sub 或额外定时器。
+6. Redis 查询失败时旧服保留本机状态，下一周期重试，避免基础设施抖动导致误删。
 
 ### 20.5 MVP 关卡主链路
 ```mermaid
@@ -2337,8 +2415,12 @@ sequenceDiagram
 1. 局内状态在 `BattleState(L1)`，不每步写 DB。
 2. 结算是 A 类写，必须事务 + 幂等。
 3. 结算奖励由 `LevelService` 在事务内调用 `AssetService.ApplyRewardInTx`。
-4. 同一个 `session_id + req_id` 重试必须返回同一结算结果。
-5. 如果结算已成功，客户端重复请求不得再次发奖。
+4. 开始关卡按 `uid + req_id` 做内存幂等，重复请求返回首次创建的 `LevelSession`，不能创建第二局。
+5. 出牌按 `uid + level_session_id + req_id` 做内存幂等，重复请求返回首次 `PlayCardResult`，不能再次推进局内状态。
+6. 开始关卡和出牌只缓存成功结果；出牌效果先作用于状态副本，全部成功后才替换正式状态；同一 `req_id` 改用其他 `level_id/card_id` 时返回参数冲突。
+7. 局内幂等记录与玩家 `BattleSession` 生命周期一致，玩家运行时被清理时一起删除，不写 DB 或 Redis。
+8. 同一个 `session_id + req_id` 重试必须返回同一结算结果。
+9. 如果结算已成功，客户端重复请求不得再次发奖。
 
 ### 20.6 MVP 工坊升级链路
 ```mermaid
