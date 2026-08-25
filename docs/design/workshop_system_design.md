@@ -542,7 +542,7 @@ value: 7
 注意：
 
 - 扣资源和更新设施等级必须在同一事务中。
-- 请求必须带 `req_id`，防止重复扣费。
+- 请求必须带 `req_id`，由 Dispatcher 的近期结果缓存处理常见网络重试。
 - 返回内容要足够客户端刷新局部 UI。
 
 ## 9. 设施效果接入
@@ -718,7 +718,7 @@ wood = player_level * 2 * hours
 | 情况 | 处理 |
 | --- | --- |
 | 离线时长不足 | 返回空奖励 |
-| req_id 重复 | 返回上次领取结果 |
+| req_id 重复 | 同节点近期缓存命中时返回上次领取结果 |
 | 系统时间异常 | 使用服务器时间 |
 | 玩家数据缺失 | 初始化默认工坊数据 |
 | 背包已满 | 按资产系统规则处理溢出 |
@@ -1250,7 +1250,6 @@ MVP 可不做独立协议动作。
 - 扣除设施升级消耗。
 - 发放离线收益。
 - 写资产流水。
-- 幂等处理。
 
 ### 16.3 OrderService
 
@@ -1321,7 +1320,7 @@ Client 打开工坊
   -> WorkshopService 计算 effective_seconds
   -> WorkshopService 读取展示柜等级和装饰加成
   -> WorkshopService 生成 RewardItem
-  -> AssetService 幂等发奖
+  -> AssetService 在事务中发奖并写资产流水
   -> WorkshopRepository 更新 last_offline_reward_at
   -> 返回奖励明细
 ```

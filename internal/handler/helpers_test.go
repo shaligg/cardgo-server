@@ -19,7 +19,6 @@ func TestToBizErrorMapsExpectedClientCodes(t *testing.T) {
 		code string
 	}{
 		{name: "bad request", err: repo.ErrInvalidReqID, code: terrors.CodeBadRequest},
-		{name: "req id conflict", err: battlesvc.ErrReqIDConflict, code: terrors.CodeBadRequest},
 		{name: "not found", err: repo.ErrCardNotOwned, code: terrors.CodeNotFound},
 		{name: "insufficient", err: repo.ErrInsufficientGold, code: terrors.CodeInsufficient},
 		{name: "already max", err: repo.ErrCardMaxLevel, code: terrors.CodeAlreadyMax},

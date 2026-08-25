@@ -36,36 +36,7 @@ func TestMigrateCreatesPlayerFacilityTable(t *testing.T) {
 	}
 }
 
-func TestChangeGoldReturnsFirstResultOnRetry(t *testing.T) {
-	repo, _ := newTestPlayerRepo(t)
-	ctx := context.Background()
-
-	first, err := repo.ChangeGold(ctx, "u1", 100, 1, "test.grant", "r1")
-	if err != nil {
-		t.Fatalf("first ChangeGold returned error: %v", err)
-	}
-	if _, err := repo.ChangeGold(ctx, "u1", -30, 1, "test.consume", "r2"); err != nil {
-		t.Fatalf("consume ChangeGold returned error: %v", err)
-	}
-
-	retry, err := repo.ChangeGold(ctx, "u1", 100, 1, "test.grant", "r1")
-	if err != nil {
-		t.Fatalf("retry ChangeGold returned error: %v", err)
-	}
-	if retry.Gold != first.Gold {
-		t.Fatalf("retry gold = %d, want first result %d", retry.Gold, first.Gold)
-	}
-
-	profile, err := repo.GetByUID(ctx, "u1")
-	if err != nil {
-		t.Fatalf("GetByUID returned error: %v", err)
-	}
-	if profile.Gold != 70 {
-		t.Fatalf("profile gold = %d, want actual balance 70", profile.Gold)
-	}
-}
-
-func TestChangeGoldWritesIdempotencyAndAssetLog(t *testing.T) {
+func TestChangeGoldWritesAssetLog(t *testing.T) {
 	repo, db := newTestPlayerRepo(t)
 	ctx := context.Background()
 
@@ -75,22 +46,6 @@ func TestChangeGoldWritesIdempotencyAndAssetLog(t *testing.T) {
 	}
 	if first.Gold != 100 {
 		t.Fatalf("first gold = %d, want 100", first.Gold)
-	}
-
-	second, err := repo.ChangeGold(ctx, "u1", 100, 1, "test.grant", "r1")
-	if err != nil {
-		t.Fatalf("retry ChangeGold returned error: %v", err)
-	}
-	if second.Gold != 100 {
-		t.Fatalf("retry gold = %d, want unchanged 100", second.Gold)
-	}
-
-	var idempotencyCount int64
-	if err := db.Model(&model.IdempotencyRecord{}).Count(&idempotencyCount).Error; err != nil {
-		t.Fatalf("count idempotency: %v", err)
-	}
-	if idempotencyCount != 1 {
-		t.Fatalf("idempotency records = %d, want 1", idempotencyCount)
 	}
 
 	var logCount int64
@@ -111,14 +66,6 @@ func TestChangeGoldInsufficientDoesNotWriteSideEffects(t *testing.T) {
 		t.Fatalf("err = %v, want ErrInsufficientGold", err)
 	}
 
-	var idempotencyCount int64
-	if err := db.Model(&model.IdempotencyRecord{}).Count(&idempotencyCount).Error; err != nil {
-		t.Fatalf("count idempotency: %v", err)
-	}
-	if idempotencyCount != 0 {
-		t.Fatalf("idempotency records = %d, want 0", idempotencyCount)
-	}
-
 	var logCount int64
 	if err := db.Model(&model.AssetLog{}).Count(&logCount).Error; err != nil {
 		t.Fatalf("count asset log: %v", err)
@@ -128,7 +75,7 @@ func TestChangeGoldInsufficientDoesNotWriteSideEffects(t *testing.T) {
 	}
 }
 
-func TestChangeInventoryItemWritesIdempotencyAndAssetLog(t *testing.T) {
+func TestChangeInventoryItemWritesAssetLog(t *testing.T) {
 	repo, db := newTestPlayerRepo(t)
 	ctx := context.Background()
 
@@ -140,57 +87,12 @@ func TestChangeInventoryItemWritesIdempotencyAndAssetLog(t *testing.T) {
 		t.Fatalf("first count = %d, want 5", first.Count)
 	}
 
-	second, err := repo.ChangeInventoryItem(ctx, "u1", 10001, 5, "test.grant_material", "ir1")
-	if err != nil {
-		t.Fatalf("retry ChangeInventoryItem returned error: %v", err)
-	}
-	if second.Count != 5 {
-		t.Fatalf("retry count = %d, want unchanged 5", second.Count)
-	}
-
-	var idempotencyCount int64
-	if err := db.Model(&model.IdempotencyRecord{}).Where("uid = ? AND action = ?", "u1", "test.grant_material:10001").Count(&idempotencyCount).Error; err != nil {
-		t.Fatalf("count idempotency: %v", err)
-	}
-	if idempotencyCount != 1 {
-		t.Fatalf("idempotency records = %d, want 1", idempotencyCount)
-	}
-
 	var logCount int64
 	if err := db.Model(&model.AssetLog{}).Where("uid = ? AND item_id = ?", "u1", int64(10001)).Count(&logCount).Error; err != nil {
 		t.Fatalf("count asset log: %v", err)
 	}
 	if logCount != 1 {
 		t.Fatalf("asset logs = %d, want 1", logCount)
-	}
-}
-
-func TestChangeInventoryItemReturnsFirstResultOnRetry(t *testing.T) {
-	repo, _ := newTestPlayerRepo(t)
-	ctx := context.Background()
-
-	first, err := repo.ChangeInventoryItem(ctx, "u1", 10001, 5, "test.grant_material", "ir1")
-	if err != nil {
-		t.Fatalf("first ChangeInventoryItem returned error: %v", err)
-	}
-	if _, err := repo.ChangeInventoryItem(ctx, "u1", 10001, -2, "test.consume_material", "ir2"); err != nil {
-		t.Fatalf("consume ChangeInventoryItem returned error: %v", err)
-	}
-
-	retry, err := repo.ChangeInventoryItem(ctx, "u1", 10001, 5, "test.grant_material", "ir1")
-	if err != nil {
-		t.Fatalf("retry ChangeInventoryItem returned error: %v", err)
-	}
-	if retry.Count != first.Count {
-		t.Fatalf("retry count = %d, want first result %d", retry.Count, first.Count)
-	}
-
-	items, err := repo.GetInventory(ctx, "u1")
-	if err != nil {
-		t.Fatalf("GetInventory returned error: %v", err)
-	}
-	if len(items) != 1 || items[0].Count != 3 {
-		t.Fatalf("inventory = %+v, want actual count 3", items)
 	}
 }
 
@@ -203,14 +105,6 @@ func TestChangeInventoryItemInsufficientDoesNotWriteSideEffects(t *testing.T) {
 		t.Fatalf("err = %v, want ErrInsufficientItem", err)
 	}
 
-	var idempotencyCount int64
-	if err := db.Model(&model.IdempotencyRecord{}).Where("uid = ?", "u1").Count(&idempotencyCount).Error; err != nil {
-		t.Fatalf("count idempotency: %v", err)
-	}
-	if idempotencyCount != 0 {
-		t.Fatalf("idempotency records = %d, want 0", idempotencyCount)
-	}
-
 	var logCount int64
 	if err := db.Model(&model.AssetLog{}).Where("uid = ?", "u1").Count(&logCount).Error; err != nil {
 		t.Fatalf("count asset log: %v", err)
@@ -220,7 +114,7 @@ func TestChangeInventoryItemInsufficientDoesNotWriteSideEffects(t *testing.T) {
 	}
 }
 
-func TestUpgradeCardInTxWithGoldCostIsAtomicAndIdempotent(t *testing.T) {
+func TestUpgradeCardInTxWithGoldCostIsAtomic(t *testing.T) {
 	repo, db := newTestPlayerRepo(t)
 	ctx := context.Background()
 	if err := repo.EnsureDefaultCards(ctx, "u1", []int64{10001}); err != nil {
@@ -238,7 +132,7 @@ func TestUpgradeCardInTxWithGoldCostIsAtomicAndIdempotent(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		card, err = repo.UpgradeCardInTx(ctx, tx, "u1", 10001, 5, "card-r1")
+		card, err = repo.UpgradeCardInTx(ctx, tx, "u1", 10001, 5)
 		return err
 	})
 	if err != nil {
@@ -256,34 +150,6 @@ func TestUpgradeCardInTxWithGoldCostIsAtomicAndIdempotent(t *testing.T) {
 	}
 	if player.Gold != 50 {
 		t.Fatalf("gold = %d, want 50", player.Gold)
-	}
-
-	var retry PlayerCard
-	var retryPlayer Player
-	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		retryPlayer, err = repo.ChangeGoldInTx(ctx, tx, "u1", -50, 1, "card.upgrade", "card-r1")
-		if err != nil {
-			return err
-		}
-		retry, err = repo.UpgradeCardInTx(ctx, tx, "u1", 10001, 5, "card-r1")
-		return err
-	})
-	if err != nil {
-		t.Fatalf("retry upgrade transaction returned error: %v", err)
-	}
-	if retry.Level != 2 {
-		t.Fatalf("retry card level = %d, want first result level 2", retry.Level)
-	}
-	if retryPlayer.Gold != 50 {
-		t.Fatalf("retry player gold = %d, want 50", retryPlayer.Gold)
-	}
-	player, err = repo.GetByUID(ctx, "u1")
-	if err != nil {
-		t.Fatalf("GetByUID after retry: %v", err)
-	}
-	if player.Gold != 50 {
-		t.Fatalf("gold after retry = %d, want unchanged 50", player.Gold)
 	}
 
 	var upgradeLogCount int64

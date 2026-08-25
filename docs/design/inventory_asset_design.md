@@ -370,9 +370,9 @@ CostItem
 - 对同一批 `cost_list/reward_list` 中相同 `item_id` 的项做标准化合并，例如 `coin:1 + coin:1` 合并为 `coin:2`。
 - 校验扣除后不能为负数。
 - 写资产流水。
-- 保证同一个 `req_id/action` 不重复执行。
 
 `Repository` 只负责表读写和数据转换，不负责调用发奖，也不编排跨玩法业务。
+普通 WS 请求的网络重试由 `handler.Dispatcher` 的近期结果缓存统一处理，资产层不重复实现。
 
 ### 9.2 发奖流程
 
@@ -381,7 +381,6 @@ CostItem
 ```text
 业务模块
   -> AssetService.Grant(uid, reward_list, reason, req_id)
-  -> 校验 req_id 是否已处理
   -> 开启事务
   -> 写入资产/道具/卡牌
   -> 写入流水
@@ -400,7 +399,6 @@ CostItem
          - 校验数量和道具配置
          - 写资产与流水
       -> 玩法 Repository 更新领奖状态/进度
-      -> 写入幂等结果
   -> 提交事务
 ```
 
@@ -411,7 +409,6 @@ CostItem
 ```text
 业务模块
   -> AssetService.Consume(uid, cost_list, reason, req_id)
-  -> 校验 req_id 是否已处理
   -> 开启事务
   -> 校验余额
   -> 扣除资产/道具/卡牌
@@ -432,7 +429,6 @@ CostItem
          - 校验数量和道具配置
          - 扣资产并写流水
       -> 玩法 Repository 更新成长/购买/结算状态
-      -> 写入幂等结果
   -> 提交事务
 ```
 
@@ -448,7 +444,6 @@ BattleService.Settle
   -> TxManager.Do(tx)
       -> AssetService.ApplyRewardInTx(tx, uid, reward_list, reason, req_id)
       -> Battle/Level Repository 写入关卡进度
-      -> 写入幂等结果
   -> 返回结算结果
 ```
 
@@ -465,43 +460,24 @@ BattleService.Settle
 - 活动任务领取生成。
 - GM 操作生成。
 
-### 10.2 幂等记录
+### 10.2 普通 WS 请求
 
-建议表：
+- 状态变更协议在 Router 中使用 `RegisterCached` 注册。
+- Dispatcher 在玩家分片内按 `uid + req_id` 缓存首次成功结果，重复请求直接返回，不进入资产和玩法逻辑。
+- 每个玩家最多保存最近 `10` 条，单条结果最大 `16KB`，TTL 与在线状态离线保留时间一致。
+- 同一 `req_id` 被用于不同 `op_code` 或参数时返回 `REQUEST_ID_CONFLICT`。
+- 失败结果不缓存；跨节点、进程重启或超过 TTL 后允许缓存 miss。
+- AssetService 和 Repository 不查询或写入通用幂等表，`req_id` 仅随资产流水落库用于审计。
 
-```text
-IdempotencyRecord
-- req_id
-- uid
-- action
-- status
-- result_json
-- created_at
-- updated_at
-```
+### 10.3 强幂等业务
 
-### 10.3 幂等返回
+支付、充值、全局结算、跨服批量发奖等不能接受重复执行的业务，使用订单号、结算号等业务唯一键，并由数据库唯一约束保证强幂等。这类业务规则由对应业务模块单独实现，不复用普通请求的短期内存缓存。
 
-重复请求命中已成功记录时，直接返回第一次结果。
+### 10.4 防重复发奖边界
 
-重复请求命中处理中记录时：
-
-- 可以返回 `PROCESSING`。
-- 或短时间等待后返回。
-
-MVP 推荐直接返回 `PROCESSING`。
-
-### 10.4 防重复发奖
-
-关键场景必须幂等：
-
-- 关卡结算。
-- 首通奖励。
-- 每日委托领取。
-- 活动兑换。
-- 卡牌升级。
-- 商店购买。
-- 广告奖励。
+- 关卡结算、卡牌升级、工坊领取等普通玩家操作由 Dispatcher 近期结果缓存覆盖常见超时重试。
+- 同一局内会话只允许结算一次，仍由玩法状态机自身保证。
+- 支付、全局结算和跨服批量发奖使用持久化业务唯一键。
 
 ## 11. 资产流水
 
@@ -755,13 +731,7 @@ INSUFFICIENT_RESOURCE
 
 ### 15.2 重复请求
 
-如果 `req_id` 已成功处理，返回第一次结果。
-
-如果 `req_id` 处理中，返回：
-
-```text
-PROCESSING
-```
+同一 GameServer 的近期结果缓存命中时返回第一次成功结果；`req_id` 对应的协议号或参数不一致时返回 `REQUEST_ID_CONFLICT`。缓存 miss 时按新请求执行。
 
 ### 15.3 配置不存在
 
@@ -797,7 +767,7 @@ MVP 必须实现：
 - 统一发奖接口。
 - 统一扣除接口。
 - 资产流水。
-- 幂等记录。
+- 普通写请求近期结果缓存。
 
 MVP 暂缓：
 
@@ -814,7 +784,7 @@ MVP 暂缓：
 
 - 可以查询资产、背包、卡牌和卡组。
 - 发奖和扣除在同一事务内完成。
-- 重复 `req_id` 不会重复发奖。
+- 同节点近期窗口内重复 `req_id` 返回首次成功结果，不会重复发奖。
 - 余额不足不会出现部分扣除。
 - 卡牌获得会正确创建或增加数量。
 

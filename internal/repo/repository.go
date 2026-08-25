@@ -1,6 +1,6 @@
 // Package repo 定义业务层依赖的持久化接口和领域数据结构。
 //
-// 具体实现负责事务、幂等记录、资产流水和缓存失效边界。
+// 具体实现负责事务、资产流水和缓存失效边界。
 package repo
 
 import (
@@ -26,7 +26,7 @@ type InventoryItem struct {
 	Count  int64
 }
 
-// ErrInvalidReqID 表示资产变更缺少幂等请求 ID。
+// ErrInvalidReqID 表示资产变更缺少用于审计的请求 ID。
 var ErrInvalidReqID = errors.New("invalid req_id")
 
 // ErrInvalidAmount 表示资产变更数量非法。
@@ -52,7 +52,7 @@ var ErrFacilityMaxLevel = errors.New("facility already max level")
 
 // PlayerRepository 定义玩家基础数据的持久化能力。
 //
-// ChangeGold 必须在实现中保证事务、幂等和资产流水一致。
+// ChangeGold 必须在实现中保证资产变更和资产流水处于同一事务。
 type PlayerRepository interface {
 	GetByUID(ctx context.Context, uid string) (Player, error)
 	ChangeGold(ctx context.Context, uid string, delta int64, itemID int64, reason string, reqID string) (Player, error)
@@ -65,7 +65,7 @@ type TxPlayerRepository interface {
 
 // InventoryRepository 定义通用可堆叠背包的持久化能力。
 //
-// ChangeInventoryItem 必须在实现中保证扣费不为负、请求幂等和资产流水一致。
+// ChangeInventoryItem 必须在实现中保证扣费不为负，并让资产变更和流水处于同一事务。
 type InventoryRepository interface {
 	GetInventory(ctx context.Context, uid string) ([]InventoryItem, error)
 	ChangeInventoryItem(ctx context.Context, uid string, itemID int64, delta int64, reason string, reqID string) (InventoryItem, error)
@@ -100,16 +100,13 @@ type PlayerDeck struct {
 }
 
 // CardRepository 定义卡牌库存与卡组的持久化能力。
-//
-// 卡牌升级和卡组保存都需要 reqID，避免客户端重试造成重复升级或覆盖异常。
 type CardRepository interface {
 	GetCards(ctx context.Context, uid string) ([]PlayerCard, error)
 	GetDeck(ctx context.Context, uid string, deckID int32) (PlayerDeck, error)
 	EnsureDefaultCards(ctx context.Context, uid string, cardIDs []int64) error
-	SaveDeck(ctx context.Context, uid string, deckID int32, name string, cardIDs []int64, reqID string) (PlayerDeck, error)
-	GetCardUpgradeResult(ctx context.Context, uid string, cardID int64, reqID string) (PlayerCard, bool, error)
-	UpgradeCard(ctx context.Context, uid string, cardID int64, maxLevel int, reqID string) (PlayerCard, error)
-	UpgradeCardInTx(ctx context.Context, tx *gorm.DB, uid string, cardID int64, maxLevel int, reqID string) (PlayerCard, error)
+	SaveDeck(ctx context.Context, uid string, deckID int32, name string, cardIDs []int64) (PlayerDeck, error)
+	UpgradeCard(ctx context.Context, uid string, cardID int64, maxLevel int) (PlayerCard, error)
+	UpgradeCardInTx(ctx context.Context, tx *gorm.DB, uid string, cardID int64, maxLevel int) (PlayerCard, error)
 }
 
 // PlayerWorkshop 是业务层使用的玩家工坊基础数据。
@@ -144,10 +141,8 @@ type WorkshopRepository interface {
 	GetOrCreateWorkshop(ctx context.Context, uid string) (PlayerWorkshop, error)
 	GetFacilities(ctx context.Context, uid string) ([]PlayerFacility, error)
 	GetOrCreateFacility(ctx context.Context, uid string, facilityID string) (PlayerFacility, error)
-	GetFacilityUpgradeResult(ctx context.Context, uid string, facilityID string, reqID string) (PlayerFacility, bool, error)
-	UpgradeFacility(ctx context.Context, uid string, facilityID string, maxLevel int, reqID string) (PlayerFacility, error)
-	UpgradeFacilityInTx(ctx context.Context, tx *gorm.DB, uid string, facilityID string, maxLevel int, reqID string) (PlayerFacility, error)
-	GetOfflineRewardClaimResult(ctx context.Context, uid string, reqID string) (OfflineRewardClaim, bool, error)
-	RecordOfflineRewardClaim(ctx context.Context, uid string, claim OfflineRewardClaim, reqID string) (OfflineRewardClaim, error)
-	RecordOfflineRewardClaimInTx(ctx context.Context, tx *gorm.DB, uid string, claim OfflineRewardClaim, reqID string) (OfflineRewardClaim, error)
+	UpgradeFacility(ctx context.Context, uid string, facilityID string, maxLevel int) (PlayerFacility, error)
+	UpgradeFacilityInTx(ctx context.Context, tx *gorm.DB, uid string, facilityID string, maxLevel int) (PlayerFacility, error)
+	RecordOfflineRewardClaim(ctx context.Context, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error)
+	RecordOfflineRewardClaimInTx(ctx context.Context, tx *gorm.DB, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error)
 }

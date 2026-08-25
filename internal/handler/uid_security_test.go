@@ -20,7 +20,7 @@ func TestBizDispatcherIgnoresPayloadUID(t *testing.T) {
 	router.Register(9001, func(ctx context.Context, targetUID string, payload json.RawMessage) (interface{}, *terrors.BizError) {
 		return targetUID, nil
 	})
-	dispatcher := NewDispatcher(router, nil)
+	dispatcher := NewDispatcher(router, nil, nil)
 
 	resp, err := dispatcher.Handle(context.Background(), "auth_uid", 9001, json.RawMessage(`{"uid":"evil_uid"}`))
 	if err != nil {

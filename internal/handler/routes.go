@@ -42,25 +42,25 @@ func NewRegisteredRouter(h *BizHandler, enableDebugOps bool) *Router {
 	router.Register(protocol.OpAssetGetInventory, h.AssetGetInventory)
 
 	router.Register(protocol.OpCardGetCards, h.CardGetCards)
-	router.Register(protocol.OpCardSaveDeck, h.CardSaveDeck)
-	router.Register(protocol.OpCardUpgrade, h.CardUpgrade)
+	router.RegisterCached(protocol.OpCardSaveDeck, h.CardSaveDeck)
+	router.RegisterCached(protocol.OpCardUpgrade, h.CardUpgrade)
 
-	router.Register(protocol.OpLevelStart, h.LevelStart)
-	router.Register(protocol.OpLevelPlayCard, h.LevelPlayCard)
-	router.Register(protocol.OpLevelSettle, h.LevelSettle)
+	router.RegisterCached(protocol.OpLevelStart, h.LevelStart)
+	router.RegisterCached(protocol.OpLevelPlayCard, h.LevelPlayCard)
+	router.RegisterCached(protocol.OpLevelSettle, h.LevelSettle)
 
 	router.Register(protocol.OpWorkshopGetOverview, h.WorkshopGetOverview)
-	router.Register(protocol.OpWorkshopUpgradeFacility, h.WorkshopUpgradeFacility)
-	router.Register(protocol.OpWorkshopClaimOffline, h.WorkshopClaimOfflineReward)
+	router.RegisterCached(protocol.OpWorkshopUpgradeFacility, h.WorkshopUpgradeFacility)
+	router.RegisterCached(protocol.OpWorkshopClaimOffline, h.WorkshopClaimOfflineReward)
 
 	// 网页搜索等待外部 HTTP，不占用玩家分片锁。
 	router.RegisterWithMode(protocol.OpWebSearch, h.WebSearch, ExecutionHandlerManaged)
 
 	if enableDebugOps {
-		router.Register(protocol.OpPlayerAddGold, h.PlayerAddGold)
-		router.Register(protocol.OpPlayerConsumeGold, h.PlayerConsumeGold)
-		router.Register(protocol.OpAssetGrantItem, h.AssetGrantItem)
-		router.Register(protocol.OpAssetConsumeItem, h.AssetConsumeItem)
+		router.RegisterCached(protocol.OpPlayerAddGold, h.PlayerAddGold)
+		router.RegisterCached(protocol.OpPlayerConsumeGold, h.PlayerConsumeGold)
+		router.RegisterCached(protocol.OpAssetGrantItem, h.AssetGrantItem)
+		router.RegisterCached(protocol.OpAssetConsumeItem, h.AssetConsumeItem)
 	}
 	return router
 }

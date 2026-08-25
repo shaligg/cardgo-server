@@ -130,20 +130,6 @@ func TestUpgradeCardConsumesGoldAndLevelsUp(t *testing.T) {
 		t.Fatalf("gold = %d, want 50", player.Gold)
 	}
 
-	retry, err := svc.UpgradeCard(ctx, "u1", 10001, "card-r1")
-	if err != nil {
-		t.Fatalf("retry UpgradeCard returned error: %v", err)
-	}
-	if retry.Card.Level != 2 || retry.GoldCost != 50 || len(retry.Costs) != 1 {
-		t.Fatalf("retry result = %+v, want first result level 2 cost 50", retry)
-	}
-	player, err = dbRepo.GetByUID(ctx, "u1")
-	if err != nil {
-		t.Fatalf("GetByUID after retry: %v", err)
-	}
-	if player.Gold != 50 {
-		t.Fatalf("gold after retry = %d, want unchanged 50", player.Gold)
-	}
 }
 
 func testCard(cardID int64) gamedata.CardConfig {

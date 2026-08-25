@@ -9,7 +9,7 @@
 - 网络层、协议层、会话层、鉴权与断线重连。
 - dispatcher、goroutine 并发模型、背压、限流和慢客户端治理。
 - 缓存、Redis、DB、Repository、CachedRepository 和一致性策略。
-- A 类数据事务、幂等、资产流水和经济日志。
+- A 类数据事务、普通请求近期防重复、强幂等业务边界、资产流水和经济日志。
 - MVP 业务服务接口、op_code、时序图和压测验收。
 
 文档关系：
@@ -30,7 +30,7 @@
 后端本期关注点：
 
 1. 登录发票、WS 首帧验票、会话建立、单点踢线。
-2. 玩家初始化、核心读写链路、A 类数据事务与幂等。
+2. 玩家初始化、核心读写链路、A 类数据事务与请求重试保护。
 3. 资产、背包、卡牌、卡组、订单/关卡、局内逻辑、工坊等 MVP 主链路的后端承载。
 4. `Service -> CachedRepository -> Repository -> Model -> DB` 数据访问链路。
 5. 连接上限、限流、背压、慢客户端治理、监控与压测验收。
@@ -141,8 +141,8 @@ Client
 
 业务写入:
 [Client] -> [biz_req(op_code, req_id, payload)] -> [Gateway(limit/validate)]
-         -> [Dispatcher(uid%N)] -> [GameService(player/card/order/workshop)]
-         -> [CachedRepository] -> [Repository] -> [DB(tx,idempotent)]
+         -> [Dispatcher(uid%N + recent result cache)] -> [GameService(player/card/order/workshop)]
+         -> [CachedRepository] -> [Repository] -> [DB(tx + asset_log)]
          -> [invalidate cache] + [update online state] + [enqueue flush]
          <- [biz_ack(result)]
 ```
@@ -503,7 +503,7 @@ MVP:
 | 这是某个玩法自己的规则吗，例如摇骰子如何得分、关卡如何结算？ | `game/<feature>` |
 | 这是公共领域接口、DTO、Local/Remote 适配或可复用规则吗？ | `globalcore/<domain>` |
 | 这是周期任务、批量扫描、赛季结算、失败重试或跨服聚合编排吗？ | `globalserver/<domain>` |
-| 这是统一发奖、扣费、流水和资产幂等吗？ | `game/asset` 接口 |
+| 这是统一发奖、扣费和资产流水吗？ | `game/asset` 接口 |
 | 这是 DB 表读写、唯一键、事务内 CRUD 吗？ | `repo` |
 
 强制要求：
@@ -521,13 +521,13 @@ MVP:
 | 模块 | 职责 | 数据写入要求 |
 |---|---|---|
 | `player` | 建号、基础资料、等级、章节进度 | A 类数据，事务写 |
-| `asset` | 金币、钻石、体力、声望、材料、碎片、发奖扣费、流水 | A 类数据，事务 + 幂等 |
-| `inventory` | 普通道具、材料、宝箱、消耗券 | A 类数据，事务 + 幂等 |
-| `card` | 卡牌库存、卡牌升级、碎片消耗 | A 类数据，事务 + 幂等 |
+| `asset` | 金币、钻石、体力、声望、材料、碎片、发奖扣费、流水 | A 类数据，事务写；入口防重复 |
+| `inventory` | 普通道具、材料、宝箱、消耗券 | A 类数据，事务写；入口防重复 |
+| `card` | 卡牌库存、卡牌升级、碎片消耗 | A 类数据，事务写；入口防重复 |
 | `deck` | 卡组编辑、卡组保存、卡组校验 | A 类数据，事务写 |
 | `order` | 订单配置、订单生成、订单完成判定 | 结算时事务写 |
 | `battle` | 单局状态、出牌、回合推进、局内订单进度 | B 类在线状态，结算转 A 类 |
-| `workshop` | 工坊设施、升级、离线收益、装饰槽位 | A 类数据，事务 + 幂等 |
+| `workshop` | 工坊设施、升级、离线收益、装饰槽位 | A 类数据，事务写；入口防重复 |
 | `economy` | 奖励、消耗、资源价值换算配置辅助 | 默认无独立玩家表 |
 
 说明：
@@ -815,10 +815,15 @@ MVP: session_id == 当前连接 ID
 2. B类允许内存先行 + 异步刷盘，但必须带版本号或时间戳做覆盖保护。
 3. C类仅保留在内存或 Redis，进程重启可丢弃。
 
-### 9.7 幂等要求（资金/道具必需）
-- 所有会修改 A类数据的接口必须携带 `req_id`。
-- DB 侧建立幂等记录（唯一键：`uid + req_id + action`）。
-- 重试命中幂等时返回首次结果，不重复执行副作用。
+### 9.7 普通写请求的近期防重复
+
+- 所有会修改 A 类数据的 WS 接口必须携带 `req_id`；新请求生成新值，重试复用原值。
+- `handler.Dispatcher` 在玩家分片内先按 `uid + req_id` 查询 GameServer 进程内近期结果缓存，命中时直接返回首次成功结果，不再进入 Handler、Service 或 Repository。
+- 缓存同时记录 `op_code` 和请求 payload 摘要；同一 `req_id` 被用于不同协议或参数时返回 `REQUEST_ID_CONFLICT`。
+- 每个玩家最多保存最近 `10` 条成功结果，单条结果最大 `16KB`，TTL 与 `state.offline_ttl_sec` 一致；失败结果不缓存。
+- 同节点重连可继续命中；玩家迁移到其他节点、GameServer 重启或超过 TTL 后允许 miss，MVP 不为普通请求增加 Redis 或永久 DB 幂等记录。
+- `req_id` 仍写入资产流水用于审计，但资产 Repository 不负责普通网络重试去重。
+- 支付、充值、全局结算、跨服批量发奖等不可接受重复执行的业务，必须使用业务订单号/结算号和数据库唯一约束实现强幂等，不能依赖本机近期缓存。
 
 
 ### 9.8 资源与道具存储路由规则
@@ -827,7 +832,7 @@ MVP: session_id == 当前连接 ID
 核心规则：
 
 1. 玩法 `Service` 决定“能不能执行、扣什么、发什么、更新什么玩法状态”。
-2. `AssetService` 只负责按 `cost_list/reward_list` 扣除或发放资产、写流水和保证幂等。
+2. `AssetService` 只负责按 `cost_list/reward_list` 扣除或发放资产，并在同一事务中写资产流水。
 3. `AssetService` 负责对同一批 `cost_list/reward_list` 做通用标准化，例如合并相同 `item_id`；这不属于玩法规则，不应散落在各玩法 `Service` 中。
 4. 事务边界由玩法 `Service` 或事务管理器建立；`Repository` 不调用发奖逻辑，不编排跨领域业务。
 5. `AssetService` 必须提供事务内入口，例如 `ApplyCostInTx`、`ApplyRewardInTx`，用于和玩法状态更新放进同一事务。
@@ -958,19 +963,8 @@ MVP 执行建议：
 - B2 阶段接入 `inventory_stack`（通用可堆叠背包表）。
 - 其他 `storage_type` 可先保留配置和接口边界。
 
-### 9.7 Demo 最小关键表结构（建议）
+### 9.9 Demo 最小关键表结构（建议）
 ```sql
--- 幂等记录：保障资产/道具写入不重复执行
-CREATE TABLE IF NOT EXISTS idempotency_record (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  uid VARCHAR(64) NOT NULL,
-  action VARCHAR(64) NOT NULL,
-  req_id VARCHAR(128) NOT NULL,
-  result_json JSON NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_uid_action_reqid (uid, action, req_id)
-);
-
 -- nonce 一次性消费记录：防重放
 CREATE TABLE IF NOT EXISTS auth_nonce (
   nonce VARCHAR(128) PRIMARY KEY,
@@ -1004,7 +998,7 @@ CREATE TABLE IF NOT EXISTS event_outbox (
 );
 ```
 
-### 9.8 MVP 玩家数据表清单
+### 9.10 MVP 玩家数据表清单
 MVP 至少需要以下业务表：
 
 | 表 | 模块 | 说明 | 一致性 |
@@ -1019,7 +1013,6 @@ MVP 至少需要以下业务表：
 | `player_decoration` | workshop | 装饰拥有记录或实例，不进入通用背包 | A |
 | `asset_log` | asset | 资源变动流水 | A |
 | `economy_log` | economy | 经济场景流水，可与 asset_log 合并起步 | A |
-| `idempotency_record` | infra | 写请求幂等记录 | A |
 
 后续占位表：
 
@@ -1033,7 +1026,7 @@ MVP 至少需要以下业务表：
 | `rank_settlement` | globalserver/rank | 排行榜赛季结算状态 |
 | `rank_reward` | globalserver/rank | 排行榜奖励生成与领取状态 |
 
-### 9.9 globalserver 任务数据表约束
+### 9.11 globalserver 任务数据表约束
 `globalserver` 的任务可能被手动触发、定时触发、失败重试或未来多实例抢占执行，因此必须从 MVP 起就设计幂等表。
 
 建议表：
@@ -1134,7 +1127,7 @@ MVP 至少需要以下业务表：
 - Demo 必做：
   - 登录发票 + 首帧验票
   - 会话管理 + 单点踢线
-  - A类数据幂等与事务写
+  - A 类数据事务写与普通请求近期结果缓存
   - 连接上限、背压、基础监控
 - 生产增强（后置）：
   - 更细粒度风控（设备指纹、异常行为模型）
@@ -1919,6 +1912,66 @@ MVP 只使用协议 Envelope 中的业务心跳，不再额外维护一套 WebSo
 - 无合法消息超过超时时间，连接关闭。
 - 持续发送非法消息不能阻止连接超时。
 
+### 19.3.2 客户端请求超时、重试与重连策略
+
+本节是客户端接入 GameServer 时必须遵守的建议策略。客户端请求超时与服务端 `pong_wait_sec` 是两套边界：前者负责及时结束 Loading 和恢复连接，后者是 GameServer 清理无效连接的最终兜底。
+
+#### 请求状态与 Loading
+
+1. 客户端发送需要响应的业务请求后立即记录请求标识、发送时间和重试次数，并开始 Loading。
+2. `0~3s` 未返回时保持正常 Loading；超过 `3s` 可以提示“网络较慢”。
+3. 请求发出后 `10s` 仍未收到对应响应时，结束普通 Loading，并根据这段时间内是否收到过其他合法服务端消息判断后续动作。
+4. `heartbeat_ack`、`push`、其他业务响应和合法 `error` 都可以证明连接仍能接收服务端消息；WebSocket 底层控制帧不参与本判断。
+
+#### 单接口超时
+
+请求等待 `10s` 期间收到过其他合法服务端消息时，说明 WebSocket 仍然可用：
+
+1. 只把当前接口判定为超时，不重建连接。
+2. 自动重试时必须复用原请求标识，最多自动重试一次。
+3. 第二次仍超时则停止自动重试，提示“服务暂时不可用”，避免坏接口触发无限请求。
+4. 明确需要较长处理时间的接口应单独配置超时，不得直接套用普通业务的 `10s`。
+
+#### 连接不可确认
+
+请求等待 `10s` 期间没有收到任何合法服务端消息时，客户端进入全局重连流程：
+
+1. 同一客户端同一时刻只能存在一个重连流程，多个请求超时不得分别创建 WebSocket。
+2. 关闭或废弃旧 WebSocket，重新向 LoginService 获取 `enter_ticket`，再连接登录服分配的目标 GameServer。
+3. 首次重连在 `0~1s` 随机抖动后执行，降低大量客户端同时重连对 LoginService 的冲击。
+4. 重连成功后，只对未确认请求按原发送顺序重试一次，并复用原请求标识。
+5. 同一请求在重连后再次超时，不再触发循环重连，直接结束请求并提示服务暂时不可用。
+
+明确收到 Socket 错误或关闭、设备网络切换、App 回到前台后确认旧连接不可用时，不等待业务请求的 `10s`，直接进入全局重连流程。
+
+#### 重连退避
+
+首次重连可以立即执行；连接建立失败后的重试间隔依次为 `1s`、`2s`、`5s`、`10s`，之后保持最大 `10s`，每次加入少量随机抖动。连接和鉴权成功后重置退避次数。
+
+#### 请求标识与迟到响应
+
+1. 新业务请求必须使用新的请求标识，重试必须复用原请求标识。
+2. 当前协议统一使用业务 DTO 中的 `req_id` 作为写请求重试标识，不再增加第二套 `cmd_cache_id`。
+3. 客户端只处理同一请求标识的第一次有效结果，重复结果直接忽略。
+4. 新连接建立后，旧连接迟到的响应不得改变新会话状态。
+5. 支付、充值、跨服批量发奖等强幂等业务仍使用各自业务流水号和数据库唯一约束，不依赖客户端重连策略。
+
+#### 客户端决策简图
+
+```text
+发送请求并开始 Loading
+        |
+        +-- 10s 内收到对应响应 ------> 完成请求
+        |
+        +-- 10s 超时，但收到过其他消息 -> 接口超时，不重连，最多重试一次
+        |
+        +-- 10s 超时且没有任何消息 ----> 全局重连
+                                             |
+                                             +-- 成功 -> 原请求标识重试一次
+                                             |
+                                             +-- 失败 -> 1s/2s/5s/10s 退避
+```
+
 ### 19.4 关键消息样例
 #### auth_req
 ```json
@@ -2065,20 +2118,20 @@ gateway/ws.Server
 
 ```go
 router.Register(protocol.OpPlayerGetProfile, playerHandler.GetProfile)
-router.Register(protocol.OpPlayerAddGold, playerHandler.AddGold)
-router.Register(protocol.OpPlayerConsumeGold, playerHandler.ConsumeGold)
+router.RegisterCached(protocol.OpPlayerAddGold, playerHandler.AddGold)
+router.RegisterCached(protocol.OpPlayerConsumeGold, playerHandler.ConsumeGold)
 
-router.Register(protocol.OpAssetGrantItem, assetHandler.GrantItem)
+router.RegisterCached(protocol.OpAssetGrantItem, assetHandler.GrantItem)
 router.Register(protocol.OpAssetGetInventory, assetHandler.GetInventory)
-router.Register(protocol.OpAssetConsumeItem, assetHandler.ConsumeItem)
+router.RegisterCached(protocol.OpAssetConsumeItem, assetHandler.ConsumeItem)
 
 router.Register(protocol.OpCardGetCards, cardHandler.GetCards)
-router.Register(protocol.OpCardSaveDeck, cardHandler.SaveDeck)
-router.Register(protocol.OpCardUpgrade, cardHandler.Upgrade)
+router.RegisterCached(protocol.OpCardSaveDeck, cardHandler.SaveDeck)
+router.RegisterCached(protocol.OpCardUpgrade, cardHandler.Upgrade)
 
-router.Register(protocol.OpLevelStart, levelHandler.Start)
-router.Register(protocol.OpLevelPlayCard, levelHandler.PlayCard)
-router.Register(protocol.OpLevelSettle, levelHandler.Settle)
+router.RegisterCached(protocol.OpLevelStart, levelHandler.Start)
+router.RegisterCached(protocol.OpLevelPlayCard, levelHandler.PlayCard)
+router.RegisterCached(protocol.OpLevelSettle, levelHandler.Settle)
 ```
 
 约束：
@@ -2091,6 +2144,7 @@ router.Register(protocol.OpLevelSettle, levelHandler.Settle)
 6. Handler 内禁止定义临时请求结构体；所有可复用请求结构统一放到 `internal/contract/protocol/request.go`。
 7. Handler 只负责把 `payload` 解码成 protocol DTO，再调用 Service，并返回业务 data；Service 不依赖 JSON tag 或传输格式。
 8. `gateway/ws` 不能直接写死 `json.Unmarshal(data)` 或 `WriteJSON` 作为主链路，必须通过 `EnvelopeCodec` 编解码。
+9. 状态变更协议使用 `RegisterCached` 注册，由 Dispatcher 统一校验 `req_id`、读取/写入近期成功结果；具体 Handler 和 Service 不重复实现网络重试缓存。
 
 ### 19.5 错误码
 | code | 含义 | 客户端动作 |
@@ -2101,7 +2155,8 @@ router.Register(protocol.OpLevelSettle, levelHandler.Settle)
 | `SERVER_FULL` | 服务满载 | 单节点重试；多节点可切换候选服 |
 | `RATE_LIMITED` | 限流 | 退避重试 |
 | `BAD_REQUEST` | 参数错误 | 修复请求 |
-| `INTERNAL_ERROR` | 服务异常 | 幂等重试 |
+| `REQUEST_ID_CONFLICT` | 同一 `req_id` 被用于不同协议或参数 | 停止重试并生成新的请求 |
+| `INTERNAL_ERROR` | 服务异常 | 复用原 `req_id` 重试一次 |
 
 ## 20. 时序图（关键链路）
 ### 20.1 连接创建请求-返回（完整链路）
@@ -2216,6 +2271,7 @@ sequenceDiagram
     participant GW as GatewayWS
     participant BD as BizDispatcher
     participant DIS as Dispatcher(player shard)
+    participant RC as RecentResultCache
     participant BR as BizRouter
     participant H as PlayerHandler
     participant SVC as PlayerService
@@ -2232,12 +2288,14 @@ sequenceDiagram
     GW->>BD: Handle(uid,op_code,payload)
     BD->>BD: resolve target_uid
     BD->>DIS: Submit(domain=player,key=uid)
+    DIS->>RC: Get(uid, req_id)
+    RC-->>DIS: miss
     DIS->>BR: Handle(op_code,target_uid,payload)
     BR->>H: handlers[op_code]
     H->>SVC: AddGold(uid, delta, req_id)
     SVC->>AS: Grant(uid, RewardItem{item_id=1,count=delta}, reason, req_id)
     AS->>REPO: ChangeGold(uid, delta, item_id, reason, req_id)
-    REPO->>DB: tx(idempotency_record + player.gold + asset_log)
+    REPO->>DB: tx(player.gold + asset_log(req_id))
     DB-->>REPO: committed + latest player
     REPO-->>CR: player
     CR->>CR: invalidate cache(uid)
@@ -2247,6 +2305,7 @@ sequenceDiagram
     SVC-->>H: biz result
     H-->>BR: biz result
     BR-->>DIS: biz result
+    DIS->>RC: Put(uid, req_id, op_code, payload_hash, result)
     DIS-->>BD: biz result
     BD-->>GW: biz result
     GW->>MT: observe biz latency / counters
@@ -2259,33 +2318,30 @@ sequenceDiagram
     autonumber
     participant C as Client
     participant GW as GatewayWS
-    participant SVC as PlayerService
-    participant AS as AssetService
-    participant REPO as Repository
-    participant DB as DB
+    participant DIS as Dispatcher(player shard)
+    participant RC as RecentResultCache
+    participant H as ModuleHandler
 
     C->>GW: biz_req(envelope.op_code=1002, payload.req_id=R1)
-    GW->>SVC: AddGold(uid, delta, R1)
-    SVC->>AS: Grant(uid, reward, reason, R1)
-    AS->>REPO: ChangeGold(uid, delta, item_id, reason, R1)
-    REPO->>DB: tx write idempotency_record + player.gold + asset_log
-    DB-->>REPO: success(player_after_write)
-    REPO-->>AS: player_after_write
-    AS-->>SVC: player_after_write
-    SVC-->>GW: player_after_write
+    GW->>DIS: Handle(uid, op_code, payload)
+    DIS->>RC: Get(uid, R1)
+    RC-->>DIS: miss
+    DIS->>H: execute handler/service/repository
+    H-->>DIS: player_after_write
+    DIS->>RC: Put(uid, R1, op_code, payload_hash, result)
+    DIS-->>GW: player_after_write
     GW-->>C: biz_ack(ok, player_after_write)
 
     C->>GW: retry biz_req(envelope.op_code=1002, payload.req_id=R1)
-    GW->>SVC: AddGold(uid, delta, R1)
-    SVC->>AS: Grant(uid, reward, reason, R1)
-    AS->>REPO: ChangeGold(uid, delta, item_id, reason, R1)
-    REPO->>DB: hit unique(uid,action,req_id)
-    DB-->>REPO: return first result(no double update)
-    REPO-->>AS: same player_after_write
-    AS-->>SVC: same player_after_write
-    SVC-->>GW: same player_after_write
+    GW->>DIS: Handle(uid, op_code, payload)
+    DIS->>RC: Get(uid, R1)
+    RC-->>DIS: hit(first result)
+    Note over DIS,H: 不再执行 Handler、Service 或 DB
+    DIS-->>GW: same player_after_write
     GW-->>C: biz_ack(ok, same_result)
 ```
+
+本流程只覆盖普通 WS 请求在同一 GameServer、近期缓存窗口内的重试。关键订单和全局任务必须另行使用持久化业务唯一键。
 
 ### 20.3.2 失败分支与返回码（写路径）
 | 阶段 | 模块 | 触发条件 | 返回给客户端 |
@@ -2293,7 +2349,8 @@ sequenceDiagram
 | 协议解析 | `gateway/ws` | `payload` 非法、字段缺失 | `error(BAD_REQUEST)` |
 | 限流 | `gateway/ws` | 请求频率超过 `biz_min_gap_ms` | `error(RATE_LIMITED)` |
 | 业务路由 | `BizRouter` | `op_code` 不支持 | `error(BAD_REQUEST)` |
-| 参数校验 | `module Handler/service/repo` | `req_id` 为空或非法 | `error(BAD_REQUEST)` |
+| 参数校验 | `handler.Dispatcher` | 缓存型写协议的 `req_id` 为空或非法 | `error(BAD_REQUEST)` |
+| 重试校验 | `handler.Dispatcher` | 同一 `req_id` 的协议号或参数摘要不一致 | `error(REQUEST_ID_CONFLICT)` |
 | 数据写入 | `repository/db` | 事务失败、连接错误 | `error(INTERNAL_ERROR)` |
 | 会话中断 | `gateway/ws` | 发送队列不可恢复 | 连接关闭（客户端重连） |
 
@@ -2402,7 +2459,7 @@ sequenceDiagram
     LS->>DB: begin tx
     LS->>AS: ApplyRewardInTx(tx, uid, rewards, "level_settle", req_id)
     AS->>REPO: asset updates + economy logs
-    LS->>REPO: update level progress + idempotency
+    LS->>REPO: update level progress
     LS->>DB: commit
     DB-->>LS: ok
     LS->>BS: CloseSession
@@ -2413,14 +2470,12 @@ sequenceDiagram
 关键规则：
 
 1. 局内状态在 `BattleState(L1)`，不每步写 DB。
-2. 结算是 A 类写，必须事务 + 幂等。
+2. 结算是 A 类写，奖励和关卡进度必须处于同一事务；普通网络重试由 Dispatcher 近期结果缓存保护。
 3. 结算奖励由 `LevelService` 在事务内调用 `AssetService.ApplyRewardInTx`。
-4. 开始关卡按 `uid + req_id` 做内存幂等，重复请求返回首次创建的 `LevelSession`，不能创建第二局。
-5. 出牌按 `uid + level_session_id + req_id` 做内存幂等，重复请求返回首次 `PlayCardResult`，不能再次推进局内状态。
-6. 开始关卡和出牌只缓存成功结果；出牌效果先作用于状态副本，全部成功后才替换正式状态；同一 `req_id` 改用其他 `level_id/card_id` 时返回参数冲突。
-7. 局内幂等记录与玩家 `BattleSession` 生命周期一致，玩家运行时被清理时一起删除，不写 DB 或 Redis。
-8. 同一个 `session_id + req_id` 重试必须返回同一结算结果。
-9. 如果结算已成功，客户端重复请求不得再次发奖。
+4. 开始关卡、出牌和结算都使用 Dispatcher 的统一近期结果缓存，不在 BattleService 内再维护一套 `req_id` 映射。
+5. 出牌效果先作用于状态副本，全部成功后才替换正式状态；失败结果不进入近期结果缓存。
+6. `BattleService` 自身仍以 `settleResult` 保证同一局内会话只结算一次，这是局内状态约束，不是通用网络重试缓存。
+7. 如果结算已成功，客户端在近期窗口内重复请求由 Dispatcher 直接返回首次结果，不得再次发奖。
 
 ### 20.6 MVP 工坊升级链路
 ```mermaid

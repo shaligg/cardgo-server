@@ -7,6 +7,7 @@ const (
 	CodeServerFull         = "SERVER_FULL"
 	CodeRateLimited        = "RATE_LIMITED"
 	CodeBadRequest         = "BAD_REQUEST"
+	CodeRequestIDConflict  = "REQUEST_ID_CONFLICT"
 	CodeUnsupported        = "UNSUPPORTED_OP"
 	CodeNotFound           = "NOT_FOUND"
 	CodeInsufficient       = "INSUFFICIENT_RESOURCE"

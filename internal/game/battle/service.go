@@ -20,8 +20,6 @@ import (
 var (
 	// ErrInvalidReqID 表示需要幂等请求 ID 的操作没有传入 req_id。
 	ErrInvalidReqID = errors.New("invalid req_id")
-	// ErrReqIDConflict 表示同一幂等请求 ID 被用于不同操作参数。
-	ErrReqIDConflict = errors.New("req_id conflicts with previous request")
 	// ErrGameDataMissing 表示关卡运行依赖的策划配置缺失。
 	ErrGameDataMissing = errors.New("game data is missing")
 	// ErrLevelNotFound 表示请求的关卡不存在。
@@ -87,7 +85,6 @@ type Service struct {
 
 	mu       sync.Mutex
 	sessions map[string]*runtimeSession
-	starts   map[requestKey]startRecord
 }
 
 type runtimeSession struct {
@@ -95,23 +92,7 @@ type runtimeSession struct {
 	level          gamedata.LevelConfig
 	nextOrderIndex int
 	pendingRewards []asset.RewardItem
-	playResults    map[string]playRecord
 	settleResult   *LevelSettleResult
-}
-
-type requestKey struct {
-	uid   string
-	reqID string
-}
-
-type startRecord struct {
-	levelID int64
-	result  LevelSession
-}
-
-type playRecord struct {
-	cardID int64
-	result PlayCardResult
 }
 
 // StartLevel 创建一个新的内存关卡会话。
@@ -127,13 +108,6 @@ func (s *Service) StartLevel(ctx context.Context, uid string, levelID int64, req
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.initLocked()
-	key := requestKey{uid: uid, reqID: reqID}
-	if previous, ok := s.starts[key]; ok {
-		if previous.levelID != levelID {
-			return LevelSession{}, ErrReqIDConflict
-		}
-		return cloneSession(previous.result), nil
-	}
 
 	level, ok := s.Data.Levels[levelID]
 	if !ok {
@@ -143,7 +117,6 @@ func (s *Service) StartLevel(ctx context.Context, uid string, levelID int64, req
 	rs := &runtimeSession{
 		level:          level,
 		nextOrderIndex: 0,
-		playResults:    map[string]playRecord{},
 		state: LevelSession{
 			SessionID:   uuid.NewString(),
 			UID:         uid,
@@ -161,9 +134,7 @@ func (s *Service) StartLevel(ctx context.Context, uid string, levelID int64, req
 	}
 
 	s.sessions[rs.state.SessionID] = rs
-	result := cloneSession(rs.state)
-	s.starts[key] = startRecord{levelID: levelID, result: result}
-	return cloneSession(result), nil
+	return cloneSession(rs.state), nil
 }
 
 // PlayCard 执行一张卡牌的 MVP 效果，并尝试自动完成满足条件的订单。
@@ -179,15 +150,6 @@ func (s *Service) PlayCard(ctx context.Context, uid string, sessionID string, ca
 	if err != nil {
 		return PlayCardResult{}, err
 	}
-	if rs.playResults == nil {
-		rs.playResults = map[string]playRecord{}
-	}
-	if previous, ok := rs.playResults[reqID]; ok {
-		if previous.cardID != cardID {
-			return PlayCardResult{}, ErrReqIDConflict
-		}
-		return clonePlayCardResult(previous.result), nil
-	}
 	if s.Data == nil {
 		return PlayCardResult{}, ErrGameDataMissing
 	}
@@ -199,9 +161,7 @@ func (s *Service) PlayCard(ctx context.Context, uid string, sessionID string, ca
 		return PlayCardResult{}, fmt.Errorf("%w: %d", ErrCardNotInSession, cardID)
 	}
 	if rs.state.Settled {
-		result := PlayCardResult{Session: cloneSession(rs.state), CardID: cardID}
-		rs.playResults[reqID] = playRecord{cardID: cardID, result: result}
-		return clonePlayCardResult(result), nil
+		return PlayCardResult{Session: cloneSession(rs.state), CardID: cardID}, nil
 	}
 	nextState := cloneSession(rs.state)
 	if err := applyCardEffects(&nextState, card); err != nil {
@@ -209,9 +169,7 @@ func (s *Service) PlayCard(ctx context.Context, uid string, sessionID string, ca
 	}
 	rs.state = nextState
 	s.completeReadyOrders(rs)
-	result := PlayCardResult{Session: cloneSession(rs.state), CardID: cardID}
-	rs.playResults[reqID] = playRecord{cardID: cardID, result: result}
-	return clonePlayCardResult(result), nil
+	return PlayCardResult{Session: cloneSession(rs.state), CardID: cardID}, nil
 }
 
 // SettleLevel 结算关卡并发放奖励。
@@ -272,9 +230,6 @@ func (s *Service) initLocked() {
 	if s.sessions == nil {
 		s.sessions = map[string]*runtimeSession{}
 	}
-	if s.starts == nil {
-		s.starts = map[requestKey]startRecord{}
-	}
 }
 
 func (s *Service) getSessionLocked(uid string, sessionID string) (*runtimeSession, error) {
@@ -319,11 +274,6 @@ func (s *Service) DeletePlayerRuntime(uid string) int {
 		}
 		delete(s.sessions, sessionID)
 		deleted++
-	}
-	for key := range s.starts {
-		if key.uid == uid {
-			delete(s.starts, key)
-		}
 	}
 	return deleted
 }

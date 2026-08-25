@@ -90,6 +90,9 @@ func (s Service) SaveDeck(ctx context.Context, uid string, deckID int32, name st
 	if err := s.ensureReady(); err != nil {
 		return repo.PlayerDeck{}, err
 	}
+	if reqID == "" {
+		return repo.PlayerDeck{}, repo.ErrInvalidReqID
+	}
 	if deckID == 0 {
 		deckID = DefaultDeckID
 	}
@@ -102,24 +105,18 @@ func (s Service) SaveDeck(ctx context.Context, uid string, deckID int32, name st
 	if err := s.validateOwnedCards(ctx, uid, cardIDs); err != nil {
 		return repo.PlayerDeck{}, err
 	}
-	return s.Repo.SaveDeck(ctx, uid, deckID, name, cardIDs, reqID)
+	return s.Repo.SaveDeck(ctx, uid, deckID, name, cardIDs)
 }
 
 // UpgradeCard 提升卡牌等级。
 //
-// 升级前先做配置和拥有校验，再由 Service 在同一事务内完成扣金币、写流水、升级和幂等。
+// 升级前先做配置和拥有校验，再由 Service 在同一事务内完成扣金币、写流水和升级。
 func (s Service) UpgradeCard(ctx context.Context, uid string, cardID int64, reqID string) (UpgradeResult, error) {
 	if err := s.ensureReady(); err != nil {
 		return UpgradeResult{}, err
 	}
 	if reqID == "" {
 		return UpgradeResult{}, repo.ErrInvalidReqID
-	}
-	if card, handled, err := s.Repo.GetCardUpgradeResult(ctx, uid, cardID, reqID); err != nil {
-		return UpgradeResult{}, err
-	} else if handled {
-		costs := s.upgradeCosts(s.Data.Cards[cardID], card.Level-1)
-		return UpgradeResult{Card: card, GoldCost: goldCostFromCosts(costs), Costs: costs}, nil
 	}
 	cardConfig, ok := s.Data.Cards[cardID]
 	if !ok {
@@ -150,7 +147,7 @@ func (s Service) UpgradeCard(ctx context.Context, uid string, cardID int64, reqI
 				break
 			}
 		}
-		card, err = s.Repo.UpgradeCardInTx(ctx, tx, uid, cardID, MaxCardLevel, reqID)
+		card, err = s.Repo.UpgradeCardInTx(ctx, tx, uid, cardID, MaxCardLevel)
 		return err
 	}); err != nil {
 		return UpgradeResult{}, err

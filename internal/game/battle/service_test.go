@@ -140,33 +140,6 @@ func TestStartLevelRequiresReqID(t *testing.T) {
 	}
 }
 
-func TestStartLevelReturnsFirstResultForDuplicateReqID(t *testing.T) {
-	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
-	first, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
-	if err != nil {
-		t.Fatalf("first StartLevel: %v", err)
-	}
-
-	retried, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
-	if err != nil {
-		t.Fatalf("retried StartLevel: %v", err)
-	}
-	if retried.SessionID != first.SessionID || len(svc.sessions) != 1 {
-		t.Fatalf("retried session = %s, first = %s, sessions = %d", retried.SessionID, first.SessionID, len(svc.sessions))
-	}
-}
-
-func TestStartLevelRejectsReqIDConflict(t *testing.T) {
-	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
-	if _, err := svc.StartLevel(context.Background(), "u1", 1, "start-1"); err != nil {
-		t.Fatalf("first StartLevel: %v", err)
-	}
-
-	if _, err := svc.StartLevel(context.Background(), "u1", 2, "start-1"); !errors.Is(err, ErrReqIDConflict) {
-		t.Fatalf("conflicting StartLevel error = %v, want ErrReqIDConflict", err)
-	}
-}
-
 func TestPlayCardRequiresReqID(t *testing.T) {
 	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
 	session, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
@@ -176,44 +149,6 @@ func TestPlayCardRequiresReqID(t *testing.T) {
 
 	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, ""); !errors.Is(err, ErrInvalidReqID) {
 		t.Fatalf("PlayCard error = %v, want ErrInvalidReqID", err)
-	}
-}
-
-func TestPlayCardReturnsFirstResultForDuplicateReqID(t *testing.T) {
-	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
-	session, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
-	if err != nil {
-		t.Fatalf("StartLevel: %v", err)
-	}
-	first, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, "play-1")
-	if err != nil {
-		t.Fatalf("first PlayCard: %v", err)
-	}
-
-	retried, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, "play-1")
-	if err != nil {
-		t.Fatalf("retried PlayCard: %v", err)
-	}
-	if retried.Session.CompletedOrders != first.Session.CompletedOrders || retried.Session.Resources["bread"] != first.Session.Resources["bread"] {
-		t.Fatalf("retried result = %+v, first = %+v", retried, first)
-	}
-	if current := svc.sessions[session.SessionID].state.Resources["bread"]; current != 0 {
-		t.Fatalf("duplicate PlayCard advanced state, bread = %d", current)
-	}
-}
-
-func TestPlayCardRejectsReqIDConflict(t *testing.T) {
-	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
-	session, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
-	if err != nil {
-		t.Fatalf("StartLevel: %v", err)
-	}
-	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, "play-1"); err != nil {
-		t.Fatalf("first PlayCard: %v", err)
-	}
-
-	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 99999, "play-1"); !errors.Is(err, ErrReqIDConflict) {
-		t.Fatalf("conflicting PlayCard error = %v, want ErrReqIDConflict", err)
 	}
 }
 
@@ -300,7 +235,7 @@ func TestDeletePlayerRuntimeRemovesOnlyTargetPlayer(t *testing.T) {
 		t.Fatalf("restart u1 after runtime deletion: %v", err)
 	}
 	if restarted.SessionID == first.SessionID {
-		t.Fatal("start idempotency record was not removed with player runtime")
+		t.Fatal("new runtime reused the deleted session id")
 	}
 }
 

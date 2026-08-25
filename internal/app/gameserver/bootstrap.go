@@ -123,6 +123,7 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 	flushQueue := state.NewMemoryFlushQueue(cfg.Server.FlushQueueMax)
 	metricsReg := imetrics.NewRegistry()
 	shardExec := dispatcher.NewShardExecutor(cfg.Server.DispatcherShards)
+	commandCache := session.NewCommandCache(time.Duration(cfg.State.OfflineTTLSec)*time.Second, 10, 16*1024)
 	searchClient := websearch.NewClient(cfg.WebSearch.BaseURL, time.Duration(cfg.WebSearch.TimeoutMS)*time.Millisecond)
 
 	nonceStore := auth.NewMemoryNonceStore()
@@ -139,7 +140,7 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		Online:           onlineState,
 	}
 	bizRouter := handler.NewRegisteredRouter(bizHandler, cfg.Debug.EnableWSDebugOps)
-	bizDispatcher := handler.NewDispatcher(bizRouter, shardExec)
+	bizDispatcher := handler.NewDispatcher(bizRouter, shardExec, commandCache)
 	wsServer := ws.NewServer(ws.Options{
 		NodeID:         cfg.Server.NodeID,
 		Addr:           fmt.Sprintf("%s:%d", cfg.Server.WSHost, cfg.Server.WSPort),
@@ -166,6 +167,7 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 			if previousServerID != cfg.Server.NodeID {
 				onlineState.Delete(uid)
 				battleService.DeletePlayerRuntime(uid)
+				commandCache.Delete(uid)
 			}
 			return nil
 		},
@@ -195,6 +197,7 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		sessions: sessionManager,
 		online:   onlineState,
 		battles:  battleService,
+		commands: commandCache,
 		wsServer: wsServer,
 	}
 	flushWorker := state.NewFlushWorker(flushQueue, onlineState, snapshotRepo, state.FlushWorkerOptions{

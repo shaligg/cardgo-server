@@ -106,27 +106,6 @@ func TestUpgradeFacilityConsumesGoldAndLevelsUp(t *testing.T) {
 		t.Fatalf("items = %+v, want material count 3", items)
 	}
 
-	retry, err := svc.UpgradeFacility(ctx, "u1", "oven", "facility-r1")
-	if err != nil {
-		t.Fatalf("retry UpgradeFacility returned error: %v", err)
-	}
-	if retry.Facility.Level != 2 || retry.GoldCost != 100 || len(retry.Costs) != 2 {
-		t.Fatalf("retry result = %+v, want first result level 2 cost gold 100 and material 2", retry)
-	}
-	player, err = dbRepo.GetByUID(ctx, "u1")
-	if err != nil {
-		t.Fatalf("GetByUID after retry: %v", err)
-	}
-	if player.Gold != 100 {
-		t.Fatalf("gold after retry = %d, want unchanged 100", player.Gold)
-	}
-	items, err = dbRepo.GetInventory(ctx, "u1")
-	if err != nil {
-		t.Fatalf("GetInventory after retry: %v", err)
-	}
-	if len(items) != 1 || items[0].Count != 3 {
-		t.Fatalf("items after retry = %+v, want unchanged material count 3", items)
-	}
 }
 
 func TestUpgradeFacilityRejectsUnknownFacility(t *testing.T) {
@@ -137,7 +116,7 @@ func TestUpgradeFacilityRejectsUnknownFacility(t *testing.T) {
 	}
 }
 
-func TestClaimOfflineRewardGrantsGoldAndIsIdempotent(t *testing.T) {
+func TestClaimOfflineRewardGrantsGoldAndMaterial(t *testing.T) {
 	svc, dbRepo, db := newTestWorkshopService(t)
 	ctx := context.Background()
 	now := time.Unix(1_700_000_000, 0)
@@ -182,25 +161,4 @@ func TestClaimOfflineRewardGrantsGoldAndIsIdempotent(t *testing.T) {
 		t.Fatalf("items = %+v, want basic material count 2", items)
 	}
 
-	retry, err := svc.ClaimOfflineReward(ctx, "u1", "offline-r1")
-	if err != nil {
-		t.Fatalf("retry ClaimOfflineReward returned error: %v", err)
-	}
-	if retry.Gold != 40 || retry.EffectiveSeconds != 7200 || retry.Preview.BasicMaterial != 2 || len(retry.Rewards) != 2 {
-		t.Fatalf("retry result = %+v, want first result", retry)
-	}
-	player, err = dbRepo.GetByUID(ctx, "u1")
-	if err != nil {
-		t.Fatalf("GetByUID after retry: %v", err)
-	}
-	if player.Gold != 40 {
-		t.Fatalf("gold after retry = %d, want unchanged 40", player.Gold)
-	}
-	items, err = dbRepo.GetInventory(ctx, "u1")
-	if err != nil {
-		t.Fatalf("GetInventory after retry: %v", err)
-	}
-	if len(items) != 1 || items[0].Count != 2 {
-		t.Fatalf("items after retry = %+v, want unchanged material count 2", items)
-	}
 }

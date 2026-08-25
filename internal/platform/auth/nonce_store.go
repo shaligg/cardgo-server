@@ -9,13 +9,19 @@ import (
 
 var ErrReplay = errors.New("nonce replay")
 
+const (
+	nonceCleanupThreshold = 2000
+	nonceCleanupInterval  = 30 * time.Second
+)
+
 type NonceStore interface {
 	ConsumeOnce(ctx context.Context, nonce string, ttl time.Duration) error
 }
 
 type MemoryNonceStore struct {
-	mu    sync.Mutex
-	items map[string]time.Time
+	mu          sync.Mutex
+	items       map[string]time.Time
+	nextCleanup time.Time
 }
 
 func NewMemoryNonceStore() *MemoryNonceStore {
@@ -28,15 +34,22 @@ func (s *MemoryNonceStore) ConsumeOnce(ctx context.Context, nonce string, ttl ti
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for k, exp := range s.items {
-		if exp.Before(now) {
-			delete(s.items, k)
+	if expiresAt, ok := s.items[nonce]; ok {
+		if expiresAt.After(now) {
+			return ErrReplay
 		}
-	}
-
-	if _, ok := s.items[nonce]; ok {
-		return ErrReplay
+		delete(s.items, nonce)
 	}
 	s.items[nonce] = now.Add(ttl)
+
+	// 数量达到阈值后最多每 30 秒扫描一次，避免每次验票都遍历全部 nonce。
+	if len(s.items) >= nonceCleanupThreshold && !now.Before(s.nextCleanup) {
+		for key, expiresAt := range s.items {
+			if !expiresAt.After(now) {
+				delete(s.items, key)
+			}
+		}
+		s.nextCleanup = now.Add(nonceCleanupInterval)
+	}
 	return nil
 }

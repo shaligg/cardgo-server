@@ -19,10 +19,14 @@ type playerOwnerReconciler struct {
 	sessions *session.MemoryManager
 	online   *state.OnlineState
 	battles  *battlegame.Service
+	commands *session.CommandCache
 	wsServer *ws.Server
 }
 
 func (r *playerOwnerReconciler) ReconcileOwners(ctx context.Context) {
+	if r.commands != nil {
+		r.commands.CleanupExpired(time.Now())
+	}
 	uids, activeUIDs := r.localUIDs(ctx)
 	if len(uids) == 0 || r.owners == nil {
 		return
@@ -93,5 +97,8 @@ func (r *playerOwnerReconciler) removePlayerRuntime(ctx context.Context, uid str
 	}
 	if r.battles != nil {
 		r.battles.DeletePlayerRuntime(uid)
+	}
+	if r.commands != nil {
+		r.commands.Delete(uid)
 	}
 }

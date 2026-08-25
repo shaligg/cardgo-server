@@ -74,25 +74,12 @@ func (r *DBPlayerRepository) GetOrCreateFacility(ctx context.Context, uid string
 	return toDomainPlayerFacility(row), nil
 }
 
-// GetFacilityUpgradeResult 查询设施升级请求是否已经执行过。
-func (r *DBPlayerRepository) GetFacilityUpgradeResult(ctx context.Context, uid string, facilityID string, reqID string) (PlayerFacility, bool, error) {
-	if reqID == "" {
-		return PlayerFacility{}, false, ErrInvalidReqID
-	}
-	var out PlayerFacility
-	handled, err := loadIdempotencyResult(r.db.WithContext(ctx), uid, facilityUpgradeAction(facilityID), reqID, &out)
-	if err != nil {
-		return PlayerFacility{}, false, err
-	}
-	return out, handled, nil
-}
-
-// UpgradeFacility 在事务中提升设施等级，并保证 reqID 幂等。
-func (r *DBPlayerRepository) UpgradeFacility(ctx context.Context, uid string, facilityID string, maxLevel int, reqID string) (PlayerFacility, error) {
+// UpgradeFacility 在事务中提升设施等级。
+func (r *DBPlayerRepository) UpgradeFacility(ctx context.Context, uid string, facilityID string, maxLevel int) (PlayerFacility, error) {
 	var out PlayerFacility
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
-		out, err = r.UpgradeFacilityInTx(ctx, tx, uid, facilityID, maxLevel, reqID)
+		out, err = r.UpgradeFacilityInTx(ctx, tx, uid, facilityID, maxLevel)
 		return err
 	})
 	if err != nil {
@@ -101,19 +88,10 @@ func (r *DBPlayerRepository) UpgradeFacility(ctx context.Context, uid string, fa
 	return out, nil
 }
 
-// UpgradeFacilityInTx 在外部事务中提升设施等级，并保证 reqID 幂等。
-func (r *DBPlayerRepository) UpgradeFacilityInTx(ctx context.Context, tx *gorm.DB, uid string, facilityID string, maxLevel int, reqID string) (PlayerFacility, error) {
-	if reqID == "" {
-		return PlayerFacility{}, ErrInvalidReqID
-	}
+// UpgradeFacilityInTx 在外部事务中提升设施等级。
+func (r *DBPlayerRepository) UpgradeFacilityInTx(ctx context.Context, tx *gorm.DB, uid string, facilityID string, maxLevel int) (PlayerFacility, error) {
 	if tx == nil {
 		return PlayerFacility{}, fmt.Errorf("transaction is nil")
-	}
-	action := facilityUpgradeAction(facilityID)
-
-	var out PlayerFacility
-	if handled, err := loadIdempotencyResult(tx.WithContext(ctx), uid, action, reqID, &out); handled || err != nil {
-		return out, err
 	}
 
 	var row model.PlayerFacility
@@ -140,32 +118,15 @@ func (r *DBPlayerRepository) UpgradeFacilityInTx(ctx context.Context, tx *gorm.D
 	if err := tx.WithContext(ctx).Save(&row).Error; err != nil {
 		return PlayerFacility{}, fmt.Errorf("save player facility: %w", err)
 	}
-	out = toDomainPlayerFacility(row)
-	if err := insertIdempotencyResult(tx.WithContext(ctx), uid, action, reqID, out); err != nil {
-		return PlayerFacility{}, err
-	}
-	return out, nil
-}
-
-// GetOfflineRewardClaimResult 查询离线收益领取请求是否已经执行过。
-func (r *DBPlayerRepository) GetOfflineRewardClaimResult(ctx context.Context, uid string, reqID string) (OfflineRewardClaim, bool, error) {
-	if reqID == "" {
-		return OfflineRewardClaim{}, false, ErrInvalidReqID
-	}
-	var out OfflineRewardClaim
-	handled, err := loadIdempotencyResult(r.db.WithContext(ctx), uid, offlineRewardClaimAction(), reqID, &out)
-	if err != nil {
-		return OfflineRewardClaim{}, false, err
-	}
-	return out, handled, nil
+	return toDomainPlayerFacility(row), nil
 }
 
 // RecordOfflineRewardClaim 记录离线收益领取结果，并在有可结算时推进结算时间。
-func (r *DBPlayerRepository) RecordOfflineRewardClaim(ctx context.Context, uid string, claim OfflineRewardClaim, reqID string) (OfflineRewardClaim, error) {
+func (r *DBPlayerRepository) RecordOfflineRewardClaim(ctx context.Context, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error) {
 	var out OfflineRewardClaim
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
-		out, err = r.RecordOfflineRewardClaimInTx(ctx, tx, uid, claim, reqID)
+		out, err = r.RecordOfflineRewardClaimInTx(ctx, tx, uid, claim)
 		return err
 	})
 	if err != nil {
@@ -175,18 +136,9 @@ func (r *DBPlayerRepository) RecordOfflineRewardClaim(ctx context.Context, uid s
 }
 
 // RecordOfflineRewardClaimInTx 在外部事务中记录离线收益领取结果。
-func (r *DBPlayerRepository) RecordOfflineRewardClaimInTx(ctx context.Context, tx *gorm.DB, uid string, claim OfflineRewardClaim, reqID string) (OfflineRewardClaim, error) {
-	if reqID == "" {
-		return OfflineRewardClaim{}, ErrInvalidReqID
-	}
+func (r *DBPlayerRepository) RecordOfflineRewardClaimInTx(ctx context.Context, tx *gorm.DB, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error) {
 	if tx == nil {
 		return OfflineRewardClaim{}, fmt.Errorf("transaction is nil")
-	}
-	action := offlineRewardClaimAction()
-
-	var out OfflineRewardClaim
-	if handled, err := loadIdempotencyResult(tx.WithContext(ctx), uid, action, reqID, &out); handled || err != nil {
-		return out, err
 	}
 
 	if claim.EffectiveSeconds > 0 {
@@ -212,11 +164,7 @@ func (r *DBPlayerRepository) RecordOfflineRewardClaimInTx(ctx context.Context, t
 		}
 	}
 
-	out = claim
-	if err := insertIdempotencyResult(tx.WithContext(ctx), uid, action, reqID, out); err != nil {
-		return OfflineRewardClaim{}, err
-	}
-	return out, nil
+	return claim, nil
 }
 
 func toDomainPlayerWorkshop(m model.PlayerWorkshop) PlayerWorkshop {
@@ -239,12 +187,4 @@ func toDomainPlayerFacility(m model.PlayerFacility) PlayerFacility {
 		out.UnlockedAt = m.UnlockedAt.Unix()
 	}
 	return out
-}
-
-func facilityUpgradeAction(facilityID string) string {
-	return fmt.Sprintf("workshop.upgrade_facility:%s", facilityID)
-}
-
-func offlineRewardClaimAction() string {
-	return "workshop.claim_offline_reward"
 }

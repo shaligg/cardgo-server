@@ -136,12 +136,6 @@ func (s Service) UpgradeFacility(ctx context.Context, uid string, facilityID str
 	if !ok {
 		return FacilityUpgradeResult{}, fmt.Errorf("%w: %s", ErrFacilityNotFound, facilityID)
 	}
-	if facility, handled, err := s.Repo.GetFacilityUpgradeResult(ctx, uid, facilityID, reqID); err != nil {
-		return FacilityUpgradeResult{}, err
-	} else if handled {
-		return s.buildUpgradeResult(facility, s.upgradeCosts(facilityConfig, facility.Level-1)), nil
-	}
-
 	current, err := s.Repo.GetOrCreateFacility(ctx, uid, facilityID)
 	if err != nil {
 		return FacilityUpgradeResult{}, err
@@ -164,7 +158,7 @@ func (s Service) UpgradeFacility(ctx context.Context, uid string, facilityID str
 				break
 			}
 		}
-		facility, err = s.Repo.UpgradeFacilityInTx(ctx, tx, uid, facilityID, facilityConfig.MaxLevel, reqID)
+		facility, err = s.Repo.UpgradeFacilityInTx(ctx, tx, uid, facilityID, facilityConfig.MaxLevel)
 		return err
 	}); err != nil {
 		return FacilityUpgradeResult{}, err
@@ -185,12 +179,6 @@ func (s Service) ClaimOfflineReward(ctx context.Context, uid string, reqID strin
 	if reqID == "" {
 		return OfflineRewardClaimResult{}, repo.ErrInvalidReqID
 	}
-	if claim, handled, err := s.Repo.GetOfflineRewardClaimResult(ctx, uid, reqID); err != nil {
-		return OfflineRewardClaimResult{}, err
-	} else if handled {
-		return s.buildClaimResult(ctx, claim, nil)
-	}
-
 	workshop, err := s.Repo.GetOrCreateWorkshop(ctx, uid)
 	if err != nil {
 		return OfflineRewardClaimResult{}, err
@@ -224,7 +212,7 @@ func (s Service) ClaimOfflineReward(ctx context.Context, uid string, reqID strin
 			}
 		}
 		var err error
-		claim, err = s.Repo.RecordOfflineRewardClaimInTx(ctx, tx, uid, claim, reqID)
+		claim, err = s.Repo.RecordOfflineRewardClaimInTx(ctx, tx, uid, claim)
 		return err
 	}); err != nil {
 		return OfflineRewardClaimResult{}, err

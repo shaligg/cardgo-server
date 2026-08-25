@@ -23,8 +23,9 @@ const (
 )
 
 type route struct {
-	handler OpHandler
-	mode    ExecutionMode
+	handler     OpHandler
+	mode        ExecutionMode
+	cacheResult bool
 }
 
 // Router 是纯业务协议路由表。
@@ -41,6 +42,11 @@ func NewRouter() *Router {
 // Register 绑定协议号和具体模块 Handler 方法。
 func (r *Router) Register(opCode int32, h OpHandler) {
 	r.RegisterWithMode(opCode, h, ExecutionPlayerSerial)
+}
+
+// RegisterCached 注册需要按 req_id 缓存近期成功结果的状态变更协议。
+func (r *Router) RegisterCached(opCode int32, h OpHandler) {
+	r.handlers[opCode] = route{handler: h, mode: ExecutionPlayerSerial, cacheResult: true}
 }
 
 // RegisterWithMode 绑定协议号、Handler 和非默认执行方式。
