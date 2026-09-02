@@ -2,10 +2,10 @@
 
 ## 1. 结论
 
-- 验收日期：2026-07-03
+- 最近验收日期：2026-09-02
 - 验收范围：Prototype 主链路功能闭环
 - 验收脚本：`scripts/loadtest/ws_prototype_smoke`、`scripts/loadtest/ws_offline_reward_smoke`
-- 验收结果：历史功能链路 PASS；切换 MySQL 后待重新执行 smoke
+- 验收结果：PASS，已完成 MySQL 实库重新验收
 
 Prototype 已跑通以下闭环：
 
@@ -55,7 +55,7 @@ go test ./...
 
 - API 地址：`http://127.0.0.1:8080`
 - WS 地址：`ws://127.0.0.1:8081/ws`
-- 数据库：MySQL，由 `GAME_DB_DSN` 指定
+- 数据库：MySQL 8.4.11，由 `GAME_DB_DSN` 指定
 - 配置目录：`configs/gamedata`
 
 ## 4. 协议覆盖
@@ -106,6 +106,7 @@ go test ./...
 | 离线收益领取 | PASS |
 | 非 0 离线收益领取 | PASS |
 | 重新登录恢复 | PASS |
+| 全量 Go 测试（含 MySQL 集成测试） | PASS |
 
 关键返回摘要：
 
