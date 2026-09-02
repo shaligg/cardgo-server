@@ -124,7 +124,7 @@ PARTITION BY RANGE (TO_DAYS(created_at)) (
 - **分区表上无法实现真正的 DB 级 `UNIQUE(uid, req_id)`**：MySQL 强制要求"分区表的所有 UNIQUE KEY 必须包含分区列"，而只要把 `created_at` 加进来：
   - 重试时 `created_at` 必然不同 → **判重失效**；
   - 一次多道具奖励（金币+N 件道具）共享 uid+req_id，在 DATETIME 秒级精度下同秒 → **误伤正常事务，回滚正常发奖**。
-- 所以 model 里**没有任何 UNIQUE 索引**，只建普通复合索引对齐后台查询（详见 §1.2.0 的 4 个复合 + 2 个单列索引清单）。幂等判重不靠 DB 约束，靠下面三层链。
+- 所以 model 里**没有任何 UNIQUE 索引**，只建普通复合索引对齐后台查询（详见 §1.2.0 的 3 个复合 + 2 个单列索引清单）。幂等判重不靠 DB 约束，靠下面三层链。
 - 真正的幂等保证链（仍完整有效）：
   1. **前端策略**：切节点 / 换连接后不再复用历史 req_id；
   2. **内存 CommandCache**：uid + req_id 最近 120s 内命中即返回缓存结果，参数 hash 不同直接抛 REQUEST_ID_CONFLICT；
