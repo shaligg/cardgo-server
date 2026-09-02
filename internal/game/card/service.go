@@ -35,11 +35,10 @@ var (
 //
 // MVP 升级消耗金币；扣费和卡牌升级由 Service 编排到同一事务内完成。
 type Service struct {
-	Repo        repo.CardRepository
-	Assets      asset.Service
-	Tx          idb.TxManager
-	Data        *gamedata.GameData
-	PlayerCache repo.PlayerCacheInvalidator
+	Repo   repo.CardRepository
+	Assets asset.Service
+	Tx     idb.TxManager
+	Data   *gamedata.GameData
 }
 
 // CardsResult 是 card.get_cards 的返回数据。
@@ -52,10 +51,9 @@ type CardsResult struct {
 
 // UpgradeResult 是 card.upgrade 的返回数据。
 type UpgradeResult struct {
-	Card     repo.PlayerCard  `json:"card"`
-	GoldCost int64            `json:"gold_cost"`
-	Costs    []asset.CostItem `json:"costs,omitempty"`
-	Player   *repo.Player     `json:"player,omitempty"`
+	Card   repo.PlayerCard  `json:"card"`
+	Costs  []asset.CostItem `json:"costs,omitempty"`
+	Player *repo.Player     `json:"player,omitempty"`
 }
 
 // GetCards 查询玩家卡牌，并为新玩家补齐初始卡。
@@ -152,10 +150,7 @@ func (s Service) UpgradeCard(ctx context.Context, uid string, cardID int64, reqI
 	}); err != nil {
 		return UpgradeResult{}, err
 	}
-	if s.PlayerCache != nil {
-		s.PlayerCache.InvalidatePlayer(uid)
-	}
-	return UpgradeResult{Card: card, GoldCost: goldCostFromCosts(costs), Costs: costs, Player: player}, nil
+	return UpgradeResult{Card: card, Costs: costs, Player: player}, nil
 }
 
 func (s Service) ensureReady() error {
@@ -220,10 +215,6 @@ func (s Service) defaultCardIDs() []int64 {
 	return ids
 }
 
-func upgradeGoldCost(currentLevel int) int64 {
-	return int64(currentLevel * 50)
-}
-
 func (s Service) upgradeCosts(card gamedata.CardConfig, currentLevel int) []asset.CostItem {
 	targetLevel := currentLevel + 1
 	for _, configured := range card.UpgradeCosts {
@@ -236,14 +227,5 @@ func (s Service) upgradeCosts(card gamedata.CardConfig, currentLevel int) []asse
 		}
 		return costs
 	}
-	return []asset.CostItem{{ItemID: gamedata.ItemIDGold, Count: upgradeGoldCost(currentLevel)}}
-}
-
-func goldCostFromCosts(costs []asset.CostItem) int64 {
-	for _, cost := range costs {
-		if cost.ItemID == gamedata.ItemIDGold {
-			return cost.Count
-		}
-	}
-	return 0
+	return nil
 }

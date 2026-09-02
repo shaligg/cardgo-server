@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"gorm.io/driver/sqlite"
+	"github.com/bigfish/go_orm_1/internal/testutil/testdb"
 	"gorm.io/gorm"
 )
 
@@ -16,14 +16,7 @@ type txManagerTestRow struct {
 
 func newTxManagerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := gdb.AutoMigrate(&txManagerTestRow{}); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return gdb
+	return testdb.Open(t, &txManagerTestRow{})
 }
 
 func TestTxManagerDoCommitsOnNilError(t *testing.T) {

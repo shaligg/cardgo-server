@@ -126,7 +126,7 @@ HTTP 管理入口已从 `bootstrap.go` 拆出到 `admin_http.go`，避免启动�
 | `handler` | op_code 路由、payload 解析、参数校验、调用 service、错误转换 | 直接查库、写玩法核心规则 |
 | `game` | 玩法规则、状态流转、奖励/消耗编排 | 解析 WS JSON、操作连接对象 |
 | `repo` | 数据读写、事务内写入、资产流水 | 判断玩法是否可领奖、是否通关；处理普通网络重试 |
-| `infra` | DB/Redis/log/metrics/cache 驱动封装 | 具体业务规则 |
+| `infra` | DB/Redis/log/metrics 驱动封装 | 具体业务规则 |
 | `platform` | 登录、鉴权、session、在线状态、事件总线 | 卡牌/工坊/关卡等玩法规则 |
 | `contract` | 协议号、请求/响应 DTO | 业务实现 |
 
@@ -585,14 +585,10 @@ internal/
     repository.go
     player_repo.go
     workshop_repo.go
-    snapshot_repo.go
-    cached_player_repo.go
-    cache_keys.go
     model/
 
   infra/
     db/
-    cache/
     redis/
     log/
     metrics/

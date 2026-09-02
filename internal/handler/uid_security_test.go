@@ -11,7 +11,7 @@ import (
 	"github.com/bigfish/go_orm_1/internal/gamedata"
 	"github.com/bigfish/go_orm_1/internal/repo"
 	"github.com/bigfish/go_orm_1/internal/repo/model"
-	"gorm.io/driver/sqlite"
+	"github.com/bigfish/go_orm_1/internal/testutil/testdb"
 	"gorm.io/gorm"
 )
 
@@ -72,13 +72,7 @@ func TestPlayerHandlerIgnoresPayloadUIDForWrite(t *testing.T) {
 
 func newUIDSecurityRepo(t *testing.T) (*repo.DBPlayerRepository, *gorm.DB) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	db := testdb.OpenGame(t)
 	dbRepo := repo.NewDBPlayerRepository(db)
-	if err := dbRepo.Migrate(); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	return dbRepo, db
 }

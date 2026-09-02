@@ -14,7 +14,7 @@ type PlayerOwner struct {
 
 // PlayerOwnerStore 提供玩家归属认领、查询和 TTL 维护能力。
 type PlayerOwnerStore interface {
-	Claim(ctx context.Context, uid string, serverID string, connID string, ttl time.Duration) (previousServerID string, err error)
+	Claim(ctx context.Context, uid string, serverID string, connID string, ttl time.Duration) (previous PlayerOwner, err error)
 	MarkOffline(ctx context.Context, uid string, serverID string, connID string, ttl time.Duration) error
 	GetLastServerID(ctx context.Context, uid string) (serverID string, ok bool, err error)
 	GetOwners(ctx context.Context, uids []string) (map[string]PlayerOwner, error)

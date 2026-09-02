@@ -8,8 +8,6 @@ server:
   max_connections: 2000
   drain_mode: false
   dispatcher_shards: 64
-  flush_queue_max: 10000
-  flush_max_retry: 3
 
 auth:
   issuer: "login-module"
@@ -32,7 +30,11 @@ ws:
   allowed_origins: ["*"]
 
 db:
-  dsn: "file:game_demo.db?cache=shared&_busy_timeout=5000"
+  dsn_env_key: "GAME_DB_DSN"
+  max_open_conns: 20
+  max_idle_conns: 10
+  conn_max_lifetime_sec: 1800
+  conn_max_idle_time_sec: 300
 
 redis:
   addr: "127.0.0.1:6379"
@@ -42,10 +44,6 @@ redis:
   player_owner_key_prefix: "game:player_owner"
   node_heartbeat_sec: 5
   node_ttl_sec: 15
-
-cache:
-  l1_ttl_sec: 30
-  l2_ttl_sec: 300
 
 state:
   offline_ttl_sec: 120

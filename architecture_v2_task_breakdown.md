@@ -30,8 +30,8 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 | P0 | 架构冻结 | 设计文档定稿 | DONE |
 | P1 | 工程骨架 | 目录与模块边界落地 | DONE |
 | P2 | 协议与接口 | Login API、ticket、WS协议、错误码、接口骨架 | DONE |
-| P3 | 主链路实现 | 登录发票 + 接入鉴权 + 会话 + 缓存读写链路 | DONE |
-| P4 | 稳定性能力 | 背压、限流、断线重连、刷盘 | IN_PROGRESS |
+| P3 | 主链路实现 | 登录发票 + 接入鉴权 + 会话 + 业务读写链路 | DONE |
+| P4 | 稳定性能力 | 背压、限流、断线重连、状态清理 | DONE |
 | P5 | 观测与压测 | 监控告警 + 2k 压测 + 验收报告 | IN_PROGRESS |
 | P6 | 发布准备 | runbook、灰度、回滚预案 | IN_PROGRESS |
 
@@ -46,7 +46,7 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 2. 输出协议附录（字段约束、错误码、兼容策略）。
 3. 输出配置附录（本地/测试/生产最小配置集合）。
 4. 输出风险清单（容量、数据一致性、故障恢复）。
-5. 冻结数据分级清单（A/B/C）与幂等策略（`req_id` + 唯一键）。
+5. 冻结数据分级清单（A/B/C）、普通请求近期结果缓存和强幂等业务唯一键策略。
 6. 冻结 `globalcore` 公共领域核心与 `globalserver` 公共服/job 编排边界。
 7. 冻结事件可靠性方案（同进程重试队列 + DLQ，后续 Outbox + MQ 迁移）。
 8. 冻结 MVP 边界（本期实现项与延期项）并评审通过。
@@ -90,14 +90,14 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 1. 实现 ticket verifier 接口与 nonce 一次性消费接口。
 2. 定义 `LoginProvider / NodeAllocator / TicketIssuer` 接口。
 3. 定义并实现 Login API、WS 通用消息结构与编解码。
-4. 定义 session manager、repo、cached repo 接口。
+4. 定义 session manager 和 repo 接口。
 5. 完成错误码映射（协议层 -> 业务层 -> 客户端）。
 6. 明确 `SERVER_FULL` 行为：目标节点满载后客户端重新请求 LoginService 分配其他存活节点。
 
 ### 交付物
 1. `platform/login` 与 `platform/auth` 接口及基础实现
 2. `framework/transport/dto` 与 `framework/transport/errors`
-3. `platform/session`、`repo`、`infra/cache` 接口骨架
+3. `platform/session`、`repo` 接口骨架
 
 ### 验收
 1. Login API + 首帧 auth 协议可在本地冒烟通过。
@@ -112,10 +112,10 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 ### 任务
 1. 登录链路：登录模块认证后签发 ticket。
 2. 接入链路：auth(ticket) 成功后绑定 session。
-3. 读链路：Service -> CachedRepository -> Repository -> DB。
-4. 写链路：DB 事务写入 + 缓存失效/更新。
+3. 读链路：Service -> Repository -> DB。
+4. 写链路：DB 事务写入，成功后同步在线热状态。
 5. 连接上限控制：`max_connections=2000`，超限返回 `SERVER_FULL`。
-6. A类数据写入必须事务 + 幂等；禁止走“仅内存后刷盘”。
+6. A 类数据必须事务写入；普通 WS 重试由 Dispatcher 近期结果缓存保护，强幂等业务使用持久化业务唯一键，禁止走“仅内存后刷盘”。
 
 ### 交付物
 1. 登录 + 接入主链路可跑通
@@ -133,13 +133,13 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 1. DONE：每连接使用一个独立有界 FIFO 发送队列；当前消息均为必要响应，队列满时关闭该慢客户端，不预建多级队列。
 2. DONE：已有入站限流和队列满踢慢客户端；连接退出时会同步回收对应的 `RateLimiter` 键。
 3. DONE：当前玩家协议按 `player` 路由键分片串行执行。
-4. DONE：已有断线恢复和异步刷盘；优雅停服会等待断线回调并刷空队列，离线 `OnlineState` 按配置 TTL 保留并定期清理。
+4. DONE：已有断线恢复；`OnlineState` 仅保存在本机内存，同节点优先恢复，跨节点从正式业务表重建，离线状态按配置 TTL 定期清理。
 5. DEFERRED：`guild/channel` 路由键随对应公共玩法实现，不在当前 Demo 创建空调用链。
 6. DONE：Redis 故障策略按当前真实用途收敛：启动注册失败则启动失败，运行中登录/归属认领失败则拒绝新会话，已有会话继续服务，节点心跳自动重试恢复；nonce/session 仍为进程内实现。
 7. DONE：globalcore 保留公共领域核心边界，承载接口、DTO、Local/Remote 适配和可复用规则；globalserver 建立结算/批处理编排边界，但不作为独立进程进入 MVP 主链路。
 8. DONE：GameServer 使用 Redis TTL 注册并定时上报节点状态，LoginService 从共享注册表分配节点；本地配置只有一个节点但不走静态分配旁路。
 9. DONE：等负载节点使用基于 UID 的稳定“两选一”策略，避免心跳间隔内突发登录集中到同一节点。
-10. DONE：开始关卡按 `uid + req_id`、出牌按 `uid + level_session_id + req_id` 做局内内存幂等；重复请求返回首次结果，参数冲突返回错误。
+10. DONE：开始关卡、出牌和结算统一使用 Dispatcher 的 `uid + req_id` 近期结果缓存；重复请求返回首次成功结果，协议号或参数冲突返回错误，BattleService 不再维护第二套请求映射。
 11. DONE：`/admin/*` 和 `/metricsz` 支持统一 Bearer Token 保护；本地 Demo 可关闭，staging/prod 强制开启且缺少环境变量时启动失败。
 12. DONE：WebSocket Origin 策略配置化；原生客户端无 Origin 时允许，本地可使用 `*`，staging/prod 默认拒绝未配置的浏览器来源。
 
@@ -170,7 +170,9 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 4. DONE：`scripts/loadtest/k6_report` 已实现 k6 summary 自动汇总与 Gate 判定报告输出。
 5. DONE：已完成缩时压测与结果汇总，报告见 `reports/loadtest_report_20260324_short.md`。
 6. DONE：修正压测脚本尾部采样偏差（`BIZ_STOP_BEFORE_CLOSE_MS` 默认 15000ms），S1 回归门槛通过。
-7. TODO：在独立压测机按 `docs/ops/runbook.md` 默认 stages 执行 S1/S2/S3，并回填最终验收结论。
+7. DONE：已补齐服务端业务、DB、Redis 的请求数和近期 2048 次操作 P95/P99。服务端业务耗时包含玩家分片排队和 Handler 执行；Redis Pipeline 按一次操作统计。k6 的 `ws_biz_rtt_ms` 继续作为客户端侧端到端耗时。
+8. DONE：提供 `scripts/monitoring/metrics_dashboard` 终端看板，直接读取 `/metricsz`；支持持续刷新、管理 Token、阈值覆盖和单次检查退出码，并对容量、延迟、认证及发送队列异常执行告警判定。
+9. TODO：在独立压测机按 `docs/ops/runbook.md` 默认 stages 执行 S1/S2/S3，并回填最终验收结论。
 
 ### 交付物
 1. 监控看板
@@ -224,8 +226,8 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 | SRE/运维 | 监控告警、灰度、发布回滚 |
 
 ## 6. 风险与缓解
-1. 风险：缓存与数据库一致性缺陷。
-- 缓解：写路径统一“先库后缓存”，加幂等键与审计日志。
+1. 风险：内存运行态与数据库状态不一致。
+- 缓解：A 类数据使用事务权威写，提交成功后再更新本机运行态；普通 WS 重试使用近期结果缓存，强幂等业务使用持久化业务唯一键，资产变化保留审计日志。
 
 2. 风险：慢客户端持续积压发送消息。
 - 缓解：每连接发送队列设置上限，队列满后只关闭对应慢客户端。
@@ -238,15 +240,17 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 
 ## 7. 当前后续任务（2026-08-11）
 1. DONE：P0-P3 与卡牌 MVP B0-B7 的本地设计、实现、集成验收和旧代码清理已经完成。
-2. DONE：P4-1 已修复优雅停服只刷一个 batch、随后清空剩余 flush 任务的问题，并补回归测试。
-3. DONE：P4-2 已补齐资产写后在线热状态同步、Redis 玩家归属、离线 `OnlineState` TTL、重连重新标记在线，以及旧节点复用现有状态循环批量核对归属并清理运行时；不增加节点通信和独立定时器。
-4. DONE：P4-3 已在连接关闭时清理对应 `RateLimiter` 键，并在 L1 读缓存命中过期项时安全删除旧记录；两者都复用现有请求流程，不增加后台扫描任务。
-5. DONE：P4-4 已实现开始关卡和出牌的局内内存幂等，覆盖重复请求、参数冲突、失败重试和运行时清理。
+2. DONE：P4-1 已删除无权威性的 `player_snapshots`、刷盘队列及对应配置指标；玩家正式数据由业务事务直接持久化。
+3. DONE：P4-2 已补齐资产写后在线热状态同步、Redis 玩家归属、离线 `OnlineState` TTL、重连重新标记在线，以及 `StateMaintainer` 批量核对归属并清理运行时；跨节点顶号使用 Redis Pub/Sub 立即关闭指定旧连接，归属扫描继续作为丢消息兜底。
+4. DONE：P4-3 已在连接关闭时清理对应 `RateLimiter` 键；通用 L1/CachedRepository 经评审无明确使用场景后删除，不增加后台扫描或缓存一致性链路。
+5. DONE：P4-4 已把状态变更协议统一接入 Dispatcher 近期结果缓存，覆盖重复请求、参数冲突、失败不缓存和玩家迁移清理；BattleService 不再保存重复的请求结果表。
 6. DONE：P4-5 已收敛为每连接单一有界 FIFO 队列，队列满即关闭对应慢客户端；删除未使用的消息优先级、Push 丢弃分支和指标，并补队列满测试。
 7. DONE：P4-6 已增加真实 WS Listener 测试，覆盖 `heartbeat_req`、普通 `biz_req` 持续超过两倍连接超时仍保持，以及非法 Envelope 不能续期。
-8. TODO：完成以上 P4 缺口后，在独立压测机执行 P5 正式压测并回填容量结论。
-9. TODO：在预发环境执行 P6 灰度发布和故障注入演练，补充演练记录。
-10. 不新增无调用方的架构预留模块；按以上顺序一次修复一个现有问题。
+8. DONE：补齐 P5 最小终端监控看板和可执行告警规则。
+9. TODO：在独立压测机执行 P5 正式压测并回填容量结论。
+10. TODO：在预发环境执行 P6 灰度发布和故障注入演练，补充演练记录。
+11. 不新增无调用方的架构预留模块；按以上顺序一次修复一个现有问题。
+12. DEFERRED：监控确认重复 DB 读取成为瓶颈后，再按技术架构 7.6 节实现 `OnlinePlayerStore`；实施前必须先完成跨节点单写者 fencing，当前 Demo 不提前增加该调用链。
 
 ## 8. 卡牌 MVP 后续任务拆分
 
@@ -270,25 +274,25 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 
 ### 8.2 B1 玩家与资产主链路
 
-当前进度：DONE。已完成金币 `player_field` 通过 `AssetService` 发放/扣除、幂等记录、资产流水和 WS smoke；`inventory_stack` 留到 B2 接入。
+当前进度：DONE。已完成金币 `player_field` 通过 `AssetService` 发放/扣除、资产流水和 WS smoke；普通请求重试由 Dispatcher 近期结果缓存保护，`inventory_stack` 留到 B2 接入。
 目标：
 
 - 打通新玩家初始化、资产查询、统一发奖扣费。
 
 任务：
 
-1. DONE：整理 `player_profile`、`asset_log`、`idempotency_record`，高频基础货币继续存玩家基础表。
+1. DONE：整理 `player_profile`、`asset_log`，高频基础货币继续存玩家基础表；普通请求不建立永久幂等记录表。
 2. DONE：实现 `AssetService.Grant` 的金币最小链路。
 3. DONE：实现 `AssetService.Consume` 的金币最小链路。
 4. MOVED：通用可堆叠背包 `player_item / inventory_stack` 移入 B2。
 5. DONE：保留当前 `add_gold/consume_gold` 为 debug 接口，并改为经由 `AssetService`。
-6. DONE：增加资产 repo 事务测试，覆盖幂等重试、资产流水、余额不足无副作用。
-7. DONE：启动游戏服后执行 WS 资产 smoke test，验证加金币、扣金币、余额不足、幂等重试和资产流水落库。
+6. DONE：增加资产 repo 事务测试，覆盖资产流水和余额不足无副作用；重复请求行为由 Dispatcher 测试覆盖。
+7. DONE：启动游戏服后执行 WS 资产 smoke test，验证加金币、扣金币、余额不足、近期重复请求和资产流水落库。
 
 验收：
 
 - 新账号登录后能自动初始化玩家资料和资产。
-- 同一 `req_id` 重试不会重复发奖或扣费。
+- 同一 GameServer 的近期窗口内，相同 `req_id` 重试返回首次成功结果，不重复发奖或扣费。
 - 资产变化有流水可查。
 
 ### 8.3 B2 背包可堆叠道具与配置层起步
@@ -314,7 +318,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 
 验收：
 
-- 可堆叠道具同一 `req_id` 重试不会重复发放或扣除。
+- 可堆叠道具在同一 GameServer 近期窗口内重试不会重复发放或扣除。
 - 可堆叠道具变化有资产流水可查。
 - 新增卡牌/订单/关卡不需要改核心逻辑代码。
 - 配置 ID 冲突、缺字段、引用不存在能被校验出来。
@@ -378,7 +382,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 2. DONE：实现 `player_deck`，MVP 使用 JSON 保存卡牌 ID 列表，后续需要复杂检索时再拆明细表。
 3. DONE：实现 `card.get_cards(1201)`，新玩家会自动补齐初始 5 张卡。
 4. DONE：实现 `card.save_deck(1202)`，校验数量、重复卡、配置存在和玩家拥有关系。
-5. DONE：实现 `card.upgrade(1203)`，升级消耗已接入 `CardConfig.upgrade_costs`，并通过统一资产扣费和幂等落库；具体数值后续按策划表继续调优。
+5. DONE：实现 `card.upgrade(1203)`，升级消耗已接入 `CardConfig.upgrade_costs`，资产扣费和卡牌升级处于同一事务，普通重试由 Dispatcher 近期结果缓存保护；具体数值后续按策划表继续调优。
 6. DONE：新增 `internal/game/card` 单元测试，覆盖查询、合法卡组、非法卡组、升级扣费。
 
 验收：
@@ -386,7 +390,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 - DONE：玩家可以查询卡牌库存。
 - DONE：玩家可以保存合法卡组。
 - DONE：非法卡组会被拒绝。
-- DONE：卡牌升级走统一扣费和幂等。
+- DONE：卡牌升级走统一事务扣费和近期请求防重复。
 
 ### 8.6 B5 工坊 MVP
 当前进度：DONE。已完成工坊总览、设施升级、设施升级配置、离线收益预览、离线收益领取和可控离线收益 smoke。
@@ -400,7 +404,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 1. DONE：实现 `player_workshop` 数据模型并接入迁移。
 2. DONE：实现 `player_facility` 数据模型并接入迁移。
 3. DONE：实现 `workshop.get_overview(1401)` 基础链路，返回默认工坊、已有设施列表和离线收益预览；设施配置已接入，升级红点后续按客户端展示需求补充。
-4. DONE：实现 `workshop.upgrade_facility(1402)`，设施升级消耗已接入 `FacilityConfig.levels.upgrade_costs`，并通过统一资产扣费和幂等落库；具体数值后续按策划表继续调优。
+4. DONE：实现 `workshop.upgrade_facility(1402)`，设施升级消耗已接入 `FacilityConfig.levels.upgrade_costs`，资产扣费和设施升级处于同一事务，普通重试由 Dispatcher 近期结果缓存保护；具体数值后续按策划表继续调优。
 5. DONE：实现 `workshop.claim_offline_reward(1403)`，MVP 按离线时长批量发放金币和基础材料，并推进 `last_offline_reward_at`；具体收益数值后续按策划表继续调优。
 
 验收：

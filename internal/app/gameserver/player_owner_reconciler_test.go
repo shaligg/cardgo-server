@@ -16,8 +16,8 @@ type fakePlayerOwnerStore struct {
 	refreshedUIDs []string
 }
 
-func (s *fakePlayerOwnerStore) Claim(ctx context.Context, uid string, serverID string, connID string, ttl time.Duration) (string, error) {
-	return "", nil
+func (s *fakePlayerOwnerStore) Claim(ctx context.Context, uid string, serverID string, connID string, ttl time.Duration) (session.PlayerOwner, error) {
+	return session.PlayerOwner{}, nil
 }
 
 func (s *fakePlayerOwnerStore) MarkOffline(ctx context.Context, uid string, serverID string, connID string, ttl time.Duration) error {

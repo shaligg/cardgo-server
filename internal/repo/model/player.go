@@ -7,7 +7,7 @@ package model
 //
 // 当前 MVP 把高频基础货币 gold 放在玩家主表，背包类通用道具放在 inventory_items。
 type Player struct {
-	UID   string `gorm:"primaryKey"`
+	UID   string `gorm:"primaryKey;size:64"`
 	Level int
 	Gold  int64
 }

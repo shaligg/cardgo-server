@@ -1,13 +1,15 @@
 # Runbook
 
 ## 1. Start Service
+- 先确认 MySQL 数据库已创建，并设置 `GAME_DB_DSN`。应用启动时执行当前 MVP 表的 `AutoMigrate`，不会创建数据库本身。
 - 先确认共享 Redis 可用：`redis-cli -h 127.0.0.1 -p 6379 ping`
-- `GAME_CONFIG=configs/config.local.yaml GAME_TICKET_SECRET=local-dev-ticket-secret go run ./cmd/gameserver`
+- `GAME_CONFIG=configs/config.local.yaml GAME_DB_DSN='game:password@tcp(127.0.0.1:3306)/game_demo?charset=utf8mb4&parseTime=True&loc=Local' GAME_TICKET_SECRET=local-dev-ticket-secret go run ./cmd/gameserver`
 - 本地配置只启动 `node-a`，但运行时仍会注册到 Redis，LoginService 不使用静态单节点列表。
 - 本地配置允许不校验管理 Token；staging/prod 启动前必须设置 `GAME_ADMIN_TOKEN`，否则服务拒绝启动。
 - 本地 `ws.allowed_origins: ["*"]` 只用于开发；staging/prod 接入 Web 客户端前必须配置准确的 `https://域名`，原生客户端无 `Origin` 不受此项影响。
 - 该启动方式只用于单节点 Demo。增加第二个 GameServer 前先拆出独立单实例 LoginServer；之后每个纯 GameServer 使用唯一的 `server.node_id` 和客户端可访问的 `server.advertised_ws_addr`，并连接同一个 Redis。
 - 正式环境中的 Redis 地址和 `advertised_ws_addr` 必须由部署配置覆盖，不能沿用仓库内的本地地址。
+- `GAME_DB_DSN` 必须包含 `charset=utf8mb4&parseTime=True&loc=Local`；账号密码只放部署环境变量或密钥系统，不写入仓库配置。
 
 ## 2. Baseline Smoke
 - `curl http://127.0.0.1:8080/healthz`
@@ -65,9 +67,43 @@
 - `ws_auth_failed`
 - `ws_rate_limited`
 - `ws_queue_kick`
-- `flush_enqueued`
-- `flush_queue_len`
-- `flush_saved`
+- `ws_biz_requests`
+- `ws_biz_duration_p95_ms` / `ws_biz_duration_p99_ms`
+- `db_requests` / `db_duration_p95_ms` / `db_duration_p99_ms`
+- `redis_requests` / `redis_duration_p95_ms` / `redis_duration_p99_ms`
+
+### 4.3 Minimal dashboard and alert check
+
+持续查看本地节点：
+
+```bash
+go run ./scripts/monitoring/metrics_dashboard
+```
+
+staging/prod 使用管理 Token：
+
+```bash
+go run ./scripts/monitoring/metrics_dashboard \
+  -url http://127.0.0.1:8080/metricsz \
+  -token "${GAME_ADMIN_TOKEN}"
+```
+
+单次检查使用 `-once`。无告警退出码为 `0`，接口访问失败为 `1`，命中告警规则为 `2`，可直接交给 cron、发布脚本或部署平台判断。首次采样和单次检查使用进程启动以来的累计计数；持续模式从第二次采样开始使用相邻采样增量。
+
+默认告警规则：
+
+| Level | Rule |
+|---|---|
+| WARN | 连接数达到 `max_connections` 的 `90%` |
+| CRITICAL | 连接数达到 `max_connections` |
+| WARN | 业务处理 P95 `>= 50ms` |
+| CRITICAL | 业务处理 P99 `>= 120ms` |
+| WARN | DB P95 `>= 20ms` |
+| WARN | Redis P95 `>= 5ms` |
+| WARN | 相邻采样期间认证失败率 `>= 0.1%` |
+| WARN | 相邻采样期间出现发送队列满踢人 |
+
+若正式配置修改了连接数，必须通过 `-max-connections` 传入相同值。延迟阈值也可以通过对应命令行参数覆盖。
 
 ## 5. Acceptance Gate (S1~S3)
 - S1/S2:
@@ -97,7 +133,7 @@
 - new WS connections/auth should receive `SERVER_FULL`
 - existing sessions continue until client disconnect or server stop
 - wait until `active_sessions` approaches `0`, then stop process
-- Stop process after final flush
+- Stop process; authoritative player data has already been committed by business transactions
 
 ## 7. Rollback
 - Restore previous binary

@@ -11,20 +11,14 @@ import (
 	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/repo"
 	"github.com/bigfish/go_orm_1/internal/repo/model"
-	"gorm.io/driver/sqlite"
+	"github.com/bigfish/go_orm_1/internal/testutil/testdb"
 	"gorm.io/gorm"
 )
 
 func newTestWorkshopService(t *testing.T) (Service, *repo.DBPlayerRepository, *gorm.DB) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	db := testdb.OpenGame(t)
 	dbRepo := repo.NewDBPlayerRepository(db)
-	if err := dbRepo.Migrate(); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	items, err := gamedata.NewCatalog([]gamedata.ItemConfig{
 		{ItemID: gamedata.ItemIDGold, Key: "gold", StorageType: gamedata.StoragePlayerField, StorageKey: "gold", Stackable: true},
 		{ItemID: gamedata.ItemIDBasicMaterial, Key: "basic_material", StorageType: gamedata.StorageInventoryStack, Stackable: true},
@@ -88,7 +82,7 @@ func TestUpgradeFacilityConsumesGoldAndLevelsUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpgradeFacility returned error: %v", err)
 	}
-	if result.Facility.Level != 2 || result.OldLevel != 1 || result.NewLevel != 2 || result.GoldCost != 100 || len(result.Costs) != 2 {
+	if result.Facility.Level != 2 || result.OldLevel != 1 || result.NewLevel != 2 || len(result.Costs) != 2 {
 		t.Fatalf("upgrade result = %+v, want level 1 -> 2 cost gold 100 and material 2", result)
 	}
 	player, err := dbRepo.GetByUID(ctx, "u1")

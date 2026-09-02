@@ -76,11 +76,6 @@ type TxInventoryRepository interface {
 	ChangeInventoryItemInTx(ctx context.Context, tx *gorm.DB, uid string, itemID int64, delta int64, reason string, reqID string) (InventoryItem, error)
 }
 
-// PlayerCacheInvalidator 定义玩家基础缓存失效能力。
-type PlayerCacheInvalidator interface {
-	InvalidatePlayer(uid string)
-}
-
 // PlayerCard 是业务层使用的玩家卡牌拥有记录。
 type PlayerCard struct {
 	UID    string `json:"uid"`

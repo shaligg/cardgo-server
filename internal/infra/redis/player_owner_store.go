@@ -10,13 +10,14 @@ import (
 )
 
 const claimPlayerOwnerScript = `
-local previous = redis.call('HGET', KEYS[1], 'server_id')
+local previous_server = redis.call('HGET', KEYS[1], 'server_id')
+local previous_conn = redis.call('HGET', KEYS[1], 'conn_id')
 redis.call('HSET', KEYS[1],
   'server_id', ARGV[1],
   'conn_id', ARGV[2],
   'updated_at', ARGV[3])
 redis.call('PEXPIRE', KEYS[1], ARGV[4])
-return previous or ''
+return {previous_server or '', previous_conn or ''}
 `
 
 const markPlayerOwnerOfflineScript = `
@@ -47,20 +48,23 @@ func NewPlayerOwnerStore(client *Client, prefix string) *PlayerOwnerStore {
 	return &PlayerOwnerStore{client: client, prefix: prefix}
 }
 
-// Claim 在 GameServer 验票并建立本地会话后原子覆盖玩家归属。
-func (s *PlayerOwnerStore) Claim(ctx context.Context, uid string, serverID string, connID string, ttl time.Duration) (string, error) {
+// Claim 在 GameServer 验票并建立本地会话后原子覆盖玩家归属，并返回旧归属。
+func (s *PlayerOwnerStore) Claim(ctx context.Context, uid string, serverID string, connID string, ttl time.Duration) (session.PlayerOwner, error) {
 	if err := s.validate(uid, serverID, ttl); err != nil || connID == "" {
 		if err != nil {
-			return "", err
+			return session.PlayerOwner{}, err
 		}
-		return "", fmt.Errorf("player owner conn_id is empty")
+		return session.PlayerOwner{}, fmt.Errorf("player owner conn_id is empty")
 	}
 	previous, err := s.client.raw.Eval(ctx, claimPlayerOwnerScript, []string{s.key(uid)},
-		serverID, connID, time.Now().Unix(), ttl.Milliseconds()).Text()
+		serverID, connID, time.Now().Unix(), ttl.Milliseconds()).StringSlice()
 	if err != nil && err != goredis.Nil {
-		return "", fmt.Errorf("claim player owner uid=%s: %w", uid, err)
+		return session.PlayerOwner{}, fmt.Errorf("claim player owner uid=%s: %w", uid, err)
 	}
-	return previous, nil
+	if len(previous) != 2 {
+		return session.PlayerOwner{}, fmt.Errorf("claim player owner uid=%s returned %d fields", uid, len(previous))
+	}
+	return session.PlayerOwner{UID: uid, ServerID: previous[0], ConnID: previous[1]}, nil
 }
 
 // MarkOffline 仅在连接仍是当前归属连接时缩短 Redis 记录的离线 TTL。

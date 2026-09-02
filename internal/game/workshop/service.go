@@ -30,10 +30,9 @@ var (
 
 // Service 是工坊模块应用服务。
 type Service struct {
-	Repo        repo.WorkshopRepository
-	Assets      asset.Service
-	Tx          idb.TxManager
-	PlayerCache repo.PlayerCacheInvalidator
+	Repo   repo.WorkshopRepository
+	Assets asset.Service
+	Tx     idb.TxManager
 	// Players 用于读取影响离线收益的玩家等级；为空时按 1 级兜底。
 	Players repo.PlayerRepository
 	Data    *gamedata.WorkshopData
@@ -66,7 +65,6 @@ type FacilityUpgradeResult struct {
 	FacilityID         string              `json:"facility_id"`
 	OldLevel           int                 `json:"old_level"`
 	NewLevel           int                 `json:"new_level"`
-	GoldCost           int64               `json:"gold_cost"`
 	Costs              []asset.CostItem    `json:"costs,omitempty"`
 	Effects            []interface{}       `json:"effects"`
 	NextUpgradePreview *UpgradePreview     `json:"next_upgrade_preview,omitempty"`
@@ -77,7 +75,6 @@ type FacilityUpgradeResult struct {
 type UpgradePreview struct {
 	FromLevel int              `json:"from_level"`
 	ToLevel   int              `json:"to_level"`
-	GoldCost  int64            `json:"gold_cost"`
 	Costs     []asset.CostItem `json:"costs,omitempty"`
 }
 
@@ -163,9 +160,6 @@ func (s Service) UpgradeFacility(ctx context.Context, uid string, facilityID str
 	}); err != nil {
 		return FacilityUpgradeResult{}, err
 	}
-	if s.PlayerCache != nil {
-		s.PlayerCache.InvalidatePlayer(uid)
-	}
 	result := s.buildUpgradeResult(facility, costs)
 	result.Player = player
 	return result, nil
@@ -217,9 +211,6 @@ func (s Service) ClaimOfflineReward(ctx context.Context, uid string, reqID strin
 	}); err != nil {
 		return OfflineRewardClaimResult{}, err
 	}
-	if s.PlayerCache != nil && claim.Gold > 0 {
-		s.PlayerCache.InvalidatePlayer(uid)
-	}
 	return s.buildClaimResult(ctx, claim, player)
 }
 
@@ -229,7 +220,6 @@ func (s Service) buildUpgradeResult(facility repo.PlayerFacility, costs []asset.
 		FacilityID: facility.FacilityID,
 		OldLevel:   facility.Level - 1,
 		NewLevel:   facility.Level,
-		GoldCost:   goldCostFromCosts(costs),
 		Costs:      costs,
 		Effects:    []interface{}{},
 	}
@@ -238,7 +228,6 @@ func (s Service) buildUpgradeResult(facility repo.PlayerFacility, costs []asset.
 		result.NextUpgradePreview = &UpgradePreview{
 			FromLevel: facility.Level,
 			ToLevel:   facility.Level + 1,
-			GoldCost:  goldCostFromCosts(nextCosts),
 			Costs:     nextCosts,
 		}
 	}
@@ -343,13 +332,4 @@ func (s Service) upgradeCosts(facility gamedata.FacilityConfig, currentLevel int
 		return costs
 	}
 	return nil
-}
-
-func goldCostFromCosts(costs []asset.CostItem) int64 {
-	for _, cost := range costs {
-		if cost.ItemID == gamedata.ItemIDGold {
-			return cost.Count
-		}
-	}
-	return 0
 }

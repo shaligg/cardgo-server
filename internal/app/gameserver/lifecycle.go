@@ -9,27 +9,49 @@ import (
 	"time"
 
 	ilog "github.com/bigfish/go_orm_1/internal/infra/log"
+	iredis "github.com/bigfish/go_orm_1/internal/infra/redis"
 )
 
-// Start 按 API 占位、WS 监听、节点注册的顺序启动应用，避免注册尚未就绪的节点。
+// Start 按 API 占位、顶号订阅、WS 监听、节点注册的顺序启动应用，避免注册尚未就绪的节点。
 func (a *Application) Start(ctx context.Context) error {
 	apiListener, err := net.Listen("tcp", a.apiServer.Addr)
 	if err != nil {
 		return fmt.Errorf("listen api %s: %w", a.apiServer.Addr, err)
 	}
+	if a.playerKickBus != nil {
+		if err := a.playerKickBus.Start(ctx, a.nodeInfo.ServerID, func(notice iredis.PlayerKickNotice) {
+			switch notice.Target {
+			case iredis.PlayerKickTargetConnection:
+				a.wsServer.KickConnection(notice.UID, notice.ConnID, notice.Reason)
+			case iredis.PlayerKickTargetUID:
+				a.wsServer.KickUID(context.Background(), notice.UID, notice.Reason)
+			case iredis.PlayerKickTargetAll:
+				a.wsServer.KickAll(notice.Reason)
+			}
+		}); err != nil {
+			_ = apiListener.Close()
+			return err
+		}
+	}
 
 	if err := a.wsServer.Start(ctx); err != nil {
 		_ = apiListener.Close()
+		if a.playerKickBus != nil {
+			_ = a.playerKickBus.Stop()
+		}
 		return err
 	}
 	if err := a.reportNode(ctx); err != nil {
 		_ = apiListener.Close()
 		_ = a.wsServer.Stop(context.Background())
+		if a.playerKickBus != nil {
+			_ = a.playerKickBus.Stop()
+		}
 		return fmt.Errorf("register game server node: %w", err)
 	}
 	a.startNodeHeartbeat(ctx)
-	if a.flushWorker != nil {
-		a.flushWorker.Start()
+	if a.stateMaintainer != nil {
+		a.stateMaintainer.Start()
 	}
 
 	go func() {
@@ -41,7 +63,7 @@ func (a *Application) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop 先停止节点心跳并注销节点，再关闭连接、刷盘队列和基础设施。
+// Stop 先停止节点心跳并注销节点，再关闭连接、状态维护器和基础设施。
 func (a *Application) Stop(ctx context.Context) error {
 	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -56,13 +78,18 @@ func (a *Application) Stop(ctx context.Context) error {
 			firstErr = err
 		}
 	}
+	if a.playerKickBus != nil {
+		if err := a.playerKickBus.Stop(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
 	if err := a.wsServer.Stop(shutdownCtx); err != nil {
 		if firstErr == nil {
 			firstErr = err
 		}
 	}
-	if a.flushWorker != nil {
-		if err := a.flushWorker.Stop(shutdownCtx); err != nil && firstErr == nil {
+	if a.stateMaintainer != nil {
+		if err := a.stateMaintainer.Stop(shutdownCtx); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

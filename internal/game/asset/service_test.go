@@ -8,7 +8,7 @@ import (
 	"github.com/bigfish/go_orm_1/internal/gamedata"
 	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/repo"
-	"gorm.io/driver/sqlite"
+	"github.com/bigfish/go_orm_1/internal/testutil/testdb"
 	"gorm.io/gorm"
 )
 
@@ -173,14 +173,8 @@ func TestApplyRewardInTxMergesDuplicatedItems(t *testing.T) {
 
 func newRealAssetService(t *testing.T) (Service, *repo.DBPlayerRepository, *gorm.DB) {
 	t.Helper()
-	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	gdb := testdb.OpenGame(t)
 	dbRepo := repo.NewDBPlayerRepository(gdb)
-	if err := dbRepo.Migrate(); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	svc := newTestService(t, dbRepo, dbRepo)
 	svc.Tx = idb.NewTxManager(gdb)
 	svc.TxPlayers = dbRepo

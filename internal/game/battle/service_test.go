@@ -9,7 +9,7 @@ import (
 	"github.com/bigfish/go_orm_1/internal/gamedata"
 	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/repo"
-	"gorm.io/driver/sqlite"
+	"github.com/bigfish/go_orm_1/internal/testutil/testdb"
 	"gorm.io/gorm"
 )
 
@@ -241,10 +241,7 @@ func TestDeletePlayerRuntimeRemovesOnlyTargetPlayer(t *testing.T) {
 
 func newTestBattleService(t *testing.T, players repo.PlayerRepository, inventory repo.InventoryRepository) *Service {
 	t.Helper()
-	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	gdb := testdb.OpenGame(t)
 	items, err := gamedata.NewCatalog([]gamedata.ItemConfig{
 		{ItemID: gamedata.ItemIDGold, Key: "gold", StorageType: gamedata.StoragePlayerField, StorageKey: "gold", Stackable: true},
 		{ItemID: gamedata.ItemIDBasicMaterial, Key: "basic_material", StorageType: gamedata.StorageInventoryStack, Stackable: true},

@@ -9,11 +9,10 @@ import (
 	"os"
 	"time"
 
+	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/repo/model"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 type loginResp struct {
@@ -158,9 +157,9 @@ func extractUID(resp map[string]interface{}) string {
 func setOfflineSince(uid string, duration time.Duration) error {
 	dsn := os.Getenv("GAME_DB_DSN")
 	if dsn == "" {
-		dsn = "file:game_demo.db?cache=shared&_busy_timeout=5000"
+		return errors.New("GAME_DB_DSN is empty")
 	}
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	db, err := idb.Open(idb.Config{DSN: dsn})
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}

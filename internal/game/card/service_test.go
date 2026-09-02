@@ -9,20 +9,13 @@ import (
 	"github.com/bigfish/go_orm_1/internal/gamedata"
 	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/repo"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
+	"github.com/bigfish/go_orm_1/internal/testutil/testdb"
 )
 
 func newTestCardService(t *testing.T) (Service, *repo.DBPlayerRepository) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	db := testdb.OpenGame(t)
 	dbRepo := repo.NewDBPlayerRepository(db)
-	if err := dbRepo.Migrate(); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	items, err := gamedata.NewCatalog([]gamedata.ItemConfig{
 		{ItemID: gamedata.ItemIDGold, Key: "gold", StorageType: gamedata.StoragePlayerField, StorageKey: "gold", Stackable: true},
 	})
@@ -119,7 +112,7 @@ func TestUpgradeCardConsumesGoldAndLevelsUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpgradeCard returned error: %v", err)
 	}
-	if result.Card.Level != 2 || result.GoldCost != 50 || len(result.Costs) != 1 {
+	if result.Card.Level != 2 || len(result.Costs) != 1 {
 		t.Fatalf("upgrade result = %+v, want level 2 cost 50", result)
 	}
 	player, err := dbRepo.GetByUID(ctx, "u1")
@@ -130,6 +123,37 @@ func TestUpgradeCardConsumesGoldAndLevelsUp(t *testing.T) {
 		t.Fatalf("gold = %d, want 50", player.Gold)
 	}
 
+}
+
+func TestUpgradeCardRejectsMissingConfiguredCost(t *testing.T) {
+	svc, dbRepo := newTestCardService(t)
+	ctx := context.Background()
+	if _, err := dbRepo.ChangeGold(ctx, "u1", 1000, gamedata.ItemIDGold, "test.grant", "gold-r1"); err != nil {
+		t.Fatalf("grant gold: %v", err)
+	}
+	if _, err := svc.UpgradeCard(ctx, "u1", 10001, "card-r1"); err != nil {
+		t.Fatalf("first UpgradeCard returned error: %v", err)
+	}
+
+	_, err := svc.UpgradeCard(ctx, "u1", 10001, "card-r2")
+	if !errors.Is(err, repo.ErrInvalidAmount) {
+		t.Fatalf("err = %v, want ErrInvalidAmount", err)
+	}
+
+	player, err := dbRepo.GetByUID(ctx, "u1")
+	if err != nil {
+		t.Fatalf("GetByUID: %v", err)
+	}
+	if player.Gold != 950 {
+		t.Fatalf("gold = %d, want 950", player.Gold)
+	}
+	cards, err := dbRepo.GetCards(ctx, "u1")
+	if err != nil {
+		t.Fatalf("GetCards: %v", err)
+	}
+	if cards[0].Level != 2 {
+		t.Fatalf("card level = %d, want 2", cards[0].Level)
+	}
 }
 
 func testCard(cardID int64) gamedata.CardConfig {

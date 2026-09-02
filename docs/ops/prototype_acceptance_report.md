@@ -5,7 +5,7 @@
 - 验收日期：2026-07-03
 - 验收范围：Prototype 主链路功能闭环
 - 验收脚本：`scripts/loadtest/ws_prototype_smoke`、`scripts/loadtest/ws_offline_reward_smoke`
-- 验收结果：PASS
+- 验收结果：历史功能链路 PASS；切换 MySQL 后待重新执行 smoke
 
 Prototype 已跑通以下闭环：
 
@@ -30,7 +30,7 @@ Prototype 已跑通以下闭环：
 启动服务：
 
 ```bash
-go run ./cmd/gameserver
+GAME_DB_DSN="$GAME_DB_DSN" GAME_TICKET_SECRET="$GAME_TICKET_SECRET" go run ./cmd/gameserver
 ```
 
 执行 Prototype smoke：
@@ -55,7 +55,7 @@ go test ./...
 
 - API 地址：`http://127.0.0.1:8080`
 - WS 地址：`ws://127.0.0.1:8081/ws`
-- 数据库：本地 SQLite，默认 `game_demo.db`
+- 数据库：MySQL，由 `GAME_DB_DSN` 指定
 - 配置目录：`configs/gamedata`
 
 ## 4. 协议覆盖

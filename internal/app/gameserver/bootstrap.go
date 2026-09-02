@@ -18,7 +18,6 @@ import (
 	workshopgame "github.com/bigfish/go_orm_1/internal/game/workshop"
 	"github.com/bigfish/go_orm_1/internal/gamedata"
 	"github.com/bigfish/go_orm_1/internal/handler"
-	"github.com/bigfish/go_orm_1/internal/infra/cache"
 	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	ilog "github.com/bigfish/go_orm_1/internal/infra/log"
 	imetrics "github.com/bigfish/go_orm_1/internal/infra/metrics"
@@ -38,11 +37,10 @@ type Application struct {
 	loginSvc              login.Provider
 	apiServer             *http.Server
 	wsServer              *ws.Server
-	flushQueue            state.FlushQueue
-	flushWorker           *state.FlushWorker
-	onlineState           *state.OnlineState
+	stateMaintainer       *state.Maintainer
 	metricsReg            *imetrics.Registry
 	redisClient           *iredis.Client
+	playerKickBus         *iredis.PlayerKickBus
 	nodeRegistry          login.NodeRegistrar
 	nodeInfo              login.NodeInfo
 	nodeHeartbeatInterval time.Duration
@@ -68,18 +66,32 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 	if cfg.Admin.RequireAuth && adminToken == "" {
 		return nil, fmt.Errorf("admin token env %s is empty", cfg.Admin.TokenEnvKey)
 	}
+	dbDSN := os.Getenv(cfg.DB.DSNEnvKey)
+	if dbDSN == "" {
+		return nil, fmt.Errorf("db dsn env %s is empty", cfg.DB.DSNEnvKey)
+	}
+	metricsReg := imetrics.NewRegistry()
 	redisClient, err := iredis.New(ctx, iredis.Config{
 		Addr:     cfg.Redis.Addr,
 		Password: os.Getenv(cfg.Redis.PasswordEnvKey),
 		DB:       cfg.Redis.DB,
+		Metrics:  metricsReg,
 	})
 	if err != nil {
 		return nil, err
 	}
 	nodeRegistry := iredis.NewNodeRegistry(redisClient, cfg.Redis.NodeKeyPrefix)
 	playerOwnerStore := iredis.NewPlayerOwnerStore(redisClient, cfg.Redis.PlayerOwnerKeyPrefix)
+	playerKickBus := iredis.NewPlayerKickBus(redisClient, cfg.Redis.NodeKeyPrefix+":kick")
 
-	gdb, err := idb.Open(idb.Config{DSN: cfg.DB.DSN})
+	gdb, err := idb.Open(idb.Config{
+		DSN:                    dbDSN,
+		MaxOpenConns:           cfg.DB.MaxOpenConns,
+		MaxIdleConns:           cfg.DB.MaxIdleConns,
+		ConnMaxLifetimeSeconds: cfg.DB.ConnMaxLifetimeSeconds,
+		ConnMaxIdleTimeSeconds: cfg.DB.ConnMaxIdleTimeSeconds,
+		Metrics:                metricsReg,
+	})
 	if err != nil {
 		_ = redisClient.Close()
 		return nil, err
@@ -88,15 +100,6 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 	if err := dbRepo.Migrate(); err != nil {
 		return nil, err
 	}
-	snapshotRepo := repo.NewDBSnapshotRepository(gdb)
-	if err := snapshotRepo.Migrate(); err != nil {
-		return nil, err
-	}
-	cachedRepo := repo.NewCachedPlayerRepository(
-		dbRepo,
-		cache.NewL1Cache(),
-		time.Duration(cfg.Cache.L1TTLSec)*time.Second,
-	)
 	itemCatalog, err := gamedata.LoadItemCatalog(cfg.GameData.ItemConfigPath)
 	if err != nil {
 		return nil, err
@@ -113,15 +116,13 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 	if err != nil {
 		return nil, err
 	}
-	assetService := asset.Service{Items: itemCatalog, Players: cachedRepo, Inventory: dbRepo, Tx: idb.NewTxManager(gdb), TxPlayers: dbRepo, TxInventory: dbRepo}
+	assetService := asset.Service{Items: itemCatalog, Players: dbRepo, Inventory: dbRepo, Tx: idb.NewTxManager(gdb), TxPlayers: dbRepo, TxInventory: dbRepo}
 	inventoryService := inventorygame.Service{Repo: dbRepo}
-	playerService := playergame.Service{Repo: cachedRepo, Assets: assetService}
-	cardService := cardgame.Service{Repo: dbRepo, Assets: assetService, Tx: idb.NewTxManager(gdb), Data: gameData, PlayerCache: cachedRepo}
+	playerService := playergame.Service{Repo: dbRepo, Assets: assetService}
+	cardService := cardgame.Service{Repo: dbRepo, Assets: assetService, Tx: idb.NewTxManager(gdb), Data: gameData}
 	battleService := &battlegame.Service{Data: gameData, Assets: assetService, Tx: idb.NewTxManager(gdb)}
-	workshopService := workshopgame.Service{Repo: dbRepo, Assets: assetService, Tx: idb.NewTxManager(gdb), PlayerCache: cachedRepo, Players: cachedRepo, Data: workshopData}
+	workshopService := workshopgame.Service{Repo: dbRepo, Assets: assetService, Tx: idb.NewTxManager(gdb), Players: dbRepo, Data: workshopData}
 	onlineState := state.NewOnlineState()
-	flushQueue := state.NewMemoryFlushQueue(cfg.Server.FlushQueueMax)
-	metricsReg := imetrics.NewRegistry()
 	shardExec := dispatcher.NewShardExecutor(cfg.Server.DispatcherShards)
 	commandCache := session.NewCommandCache(time.Duration(cfg.State.OfflineTTLSec)*time.Second, 10, 16*1024)
 	searchClient := websearch.NewClient(cfg.WebSearch.BaseURL, time.Duration(cfg.WebSearch.TimeoutMS)*time.Millisecond)
@@ -159,15 +160,26 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		AllowedOrigins:  cfg.WS.AllowedOrigins,
 		BizHandler:      bizDispatcher,
 		OnSessionBound: func(ctx context.Context, uid string, connID string) error {
-			previousServerID, err := playerOwnerStore.Claim(ctx, uid, cfg.Server.NodeID, connID, time.Duration(cfg.State.OwnerTTLSec)*time.Second)
+			previousOwner, err := playerOwnerStore.Claim(ctx, uid, cfg.Server.NodeID, connID, time.Duration(cfg.State.OwnerTTLSec)*time.Second)
 			if err != nil {
 				return err
 			}
 			// 无法证明归属连续时不复用本机旧状态，避免 A -> B -> A 后恢复 A 的过期副本。
-			if previousServerID != cfg.Server.NodeID {
+			if previousOwner.ServerID != cfg.Server.NodeID {
 				onlineState.Delete(uid)
 				battleService.DeletePlayerRuntime(uid)
 				commandCache.Delete(uid)
+			}
+			if previousOwner.ServerID != "" && previousOwner.ServerID != cfg.Server.NodeID && previousOwner.ConnID != "" {
+				notice := iredis.PlayerKickNotice{
+					Target: iredis.PlayerKickTargetConnection,
+					UID:    uid,
+					ConnID: previousOwner.ConnID,
+					Reason: "player connected to another game server",
+				}
+				if err := playerKickBus.Publish(ctx, previousOwner.ServerID, notice); err != nil {
+					ilog.Errorf("publish player kick failed uid=%s old_server=%s old_conn=%s err=%v", uid, previousOwner.ServerID, previousOwner.ConnID, err)
+				}
 			}
 			return nil
 		},
@@ -180,14 +192,8 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 				ilog.Errorf("mark player owner offline failed uid=%s conn=%s err=%v", uid, connID, err)
 			}
 			onlineState.MarkOffline(uid, time.Duration(cfg.State.OfflineTTLSec)*time.Second)
-			if err := flushQueue.Enqueue(ctx, state.FlushTask{UID: uid}); err != nil {
-				ilog.Errorf("enqueue flush failed uid=%s conn=%s err=%v", uid, connID, err)
-				return
-			}
-			metricsReg.IncFlushEnqueued()
-			metricsReg.SetFlushQueueLen(int64(flushQueue.Len()))
 		},
-		OnRestoreState: buildRestoreStateCallback(onlineState, snapshotRepo),
+		OnRestoreState: buildRestoreStateCallback(onlineState, dbRepo),
 		Metrics:        metricsReg,
 	})
 	ownerReconciler := &playerOwnerReconciler{
@@ -200,14 +206,10 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		commands: commandCache,
 		wsServer: wsServer,
 	}
-	flushWorker := state.NewFlushWorker(flushQueue, onlineState, snapshotRepo, state.FlushWorkerOptions{
-		BatchSize:          128,
-		Interval:           200 * time.Millisecond,
-		MaxRetry:           cfg.Server.FlushMaxRetry,
+	stateMaintainer := state.NewMaintainer(onlineState, state.MaintainerOptions{
 		CleanupInterval:    time.Duration(cfg.State.CleanupIntervalSec) * time.Second,
 		OwnerCheckInterval: time.Duration(cfg.State.OwnerCheckIntervalSec) * time.Second,
 		OwnerReconciler:    ownerReconciler,
-		Observer:           newFlushMetricsObserver(metricsReg),
 	})
 
 	loginService := login.Service{
@@ -230,17 +232,16 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 
 	ilog.Infof("bootstrap done node=%s api=%s ws=%s", cfg.Server.NodeID, apiAddr, wsServer.Addr)
 	return &Application{
-		cfg:          cfg,
-		bus:          eventbus.NewInProcBus(),
-		loginSvc:     loginService,
-		apiServer:    apiServer,
-		wsServer:     wsServer,
-		flushQueue:   flushQueue,
-		flushWorker:  flushWorker,
-		onlineState:  onlineState,
-		metricsReg:   metricsReg,
-		redisClient:  redisClient,
-		nodeRegistry: nodeRegistry,
+		cfg:             cfg,
+		bus:             eventbus.NewInProcBus(),
+		loginSvc:        loginService,
+		apiServer:       apiServer,
+		wsServer:        wsServer,
+		stateMaintainer: stateMaintainer,
+		metricsReg:      metricsReg,
+		redisClient:     redisClient,
+		playerKickBus:   playerKickBus,
+		nodeRegistry:    nodeRegistry,
 		nodeInfo: login.NodeInfo{
 			ServerID:  cfg.Server.NodeID,
 			WSAddr:    cfg.Server.AdvertisedWSAddr,

@@ -2,12 +2,13 @@ package gameserver
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/bigfish/go_orm_1/internal/platform/state"
+	"github.com/bigfish/go_orm_1/internal/repo"
 )
 
-func buildRestoreStateCallback(online *state.OnlineState, snapshots state.SnapshotStore) func(ctx context.Context, uid string) (map[string]interface{}, bool) {
+// buildRestoreStateCallback 优先复用本节点内存；内存不存在时从正式玩家表重建。
+func buildRestoreStateCallback(online *state.OnlineState, players repo.PlayerRepository) func(ctx context.Context, uid string) (map[string]interface{}, bool) {
 	return func(ctx context.Context, uid string) (map[string]interface{}, bool) {
 		if online != nil {
 			if st, ok := online.Get(uid); ok {
@@ -15,33 +16,27 @@ func buildRestoreStateCallback(online *state.OnlineState, snapshots state.Snapsh
 				return cloneMap(st.Data), true
 			}
 		}
-		if snapshots == nil {
+		if players == nil {
 			return nil, false
 		}
-
-		snap, ok, err := snapshots.LoadSnapshot(ctx, uid)
-		if err != nil || !ok {
+		player, err := players.GetByUID(ctx, uid)
+		if err != nil {
 			return nil, false
 		}
-
-		var m map[string]interface{}
-		if len(snap.Payload) > 0 {
-			if err := json.Unmarshal(snap.Payload, &m); err != nil {
-				return nil, false
-			}
-		}
-		if m == nil {
-			m = map[string]interface{}{}
+		data := map[string]interface{}{
+			"uid":   player.UID,
+			"level": player.Level,
+			"gold":  player.Gold,
 		}
 
 		if online != nil {
 			online.Set(state.PlayerState{
 				UID:     uid,
-				Version: snap.Version,
-				Data:    cloneMap(m),
+				Version: 1,
+				Data:    cloneMap(data),
 			})
 		}
-		return m, true
+		return data, true
 	}
 }
 

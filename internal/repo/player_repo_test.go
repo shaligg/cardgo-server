@@ -5,20 +5,14 @@ import (
 	"testing"
 
 	"github.com/bigfish/go_orm_1/internal/repo/model"
-	"gorm.io/driver/sqlite"
+	"github.com/bigfish/go_orm_1/internal/testutil/testdb"
 	"gorm.io/gorm"
 )
 
 func newTestPlayerRepo(t *testing.T) (*DBPlayerRepository, *gorm.DB) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	db := testdb.OpenGame(t)
 	repo := NewDBPlayerRepository(db)
-	if err := repo.Migrate(); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	return repo, db
 }
 

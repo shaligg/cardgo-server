@@ -8,8 +8,6 @@ server:
   max_connections: 2000
   drain_mode: false
   dispatcher_shards: 64
-  flush_queue_max: 10000
-  flush_max_retry: 3
 
 admin:
   require_auth: true
@@ -25,7 +23,11 @@ ws:
   allowed_origins: []
 
 db:
-  dsn: "file:game_staging.db?cache=shared&_busy_timeout=5000"
+  dsn_env_key: "GAME_DB_DSN"
+  max_open_conns: 50
+  max_idle_conns: 20
+  conn_max_lifetime_sec: 1800
+  conn_max_idle_time_sec: 300
 
 redis:
   addr: "127.0.0.1:6379"

@@ -20,8 +20,6 @@ type Config struct {
 		MaxConnections   int    `yaml:"max_connections"`
 		DrainMode        bool   `yaml:"drain_mode"`
 		DispatcherShards int    `yaml:"dispatcher_shards"`
-		FlushQueueMax    int    `yaml:"flush_queue_max"`
-		FlushMaxRetry    int    `yaml:"flush_max_retry"`
 	} `yaml:"server"`
 	Auth struct {
 		Issuer       string `yaml:"issuer"`
@@ -44,12 +42,12 @@ type Config struct {
 		AllowedOrigins       []string `yaml:"allowed_origins"`
 	} `yaml:"ws"`
 	DB struct {
-		DSN string `yaml:"dsn"`
+		DSNEnvKey              string `yaml:"dsn_env_key"`
+		MaxOpenConns           int    `yaml:"max_open_conns"`
+		MaxIdleConns           int    `yaml:"max_idle_conns"`
+		ConnMaxLifetimeSeconds int    `yaml:"conn_max_lifetime_sec"`
+		ConnMaxIdleTimeSeconds int    `yaml:"conn_max_idle_time_sec"`
 	} `yaml:"db"`
-	Cache struct {
-		L1TTLSec int `yaml:"l1_ttl_sec"`
-		L2TTLSec int `yaml:"l2_ttl_sec"`
-	} `yaml:"cache"`
 	State struct {
 		OfflineTTLSec         int `yaml:"offline_ttl_sec"`
 		CleanupIntervalSec    int `yaml:"cleanup_interval_sec"`
@@ -112,8 +110,6 @@ func defaultConfig() Config {
 	cfg.Server.AdvertisedWSAddr = "ws://127.0.0.1:8081/ws"
 	cfg.Server.MaxConnections = 2000
 	cfg.Server.DispatcherShards = 64
-	cfg.Server.FlushQueueMax = 10000
-	cfg.Server.FlushMaxRetry = 3
 
 	cfg.Auth.Issuer = "login-module"
 	cfg.Auth.Algorithm = "hmac-sha256"
@@ -128,9 +124,11 @@ func defaultConfig() Config {
 	cfg.WS.SendQueueSize = 256
 	cfg.WS.BizMinGapMS = 5
 	cfg.WS.MaxMessageBytes = 64 * 1024
-	cfg.DB.DSN = "file:game_demo.db?cache=shared&_busy_timeout=5000"
-	cfg.Cache.L1TTLSec = 30
-	cfg.Cache.L2TTLSec = 300
+	cfg.DB.DSNEnvKey = "GAME_DB_DSN"
+	cfg.DB.MaxOpenConns = 20
+	cfg.DB.MaxIdleConns = 10
+	cfg.DB.ConnMaxLifetimeSeconds = 1800
+	cfg.DB.ConnMaxIdleTimeSeconds = 300
 	cfg.State.OfflineTTLSec = 120
 	cfg.State.CleanupIntervalSec = 10
 	cfg.State.OwnerCheckIntervalSec = 5
@@ -181,12 +179,6 @@ func applyDefaults(cfg *Config) {
 	if cfg.Server.DispatcherShards <= 0 {
 		cfg.Server.DispatcherShards = 64
 	}
-	if cfg.Server.FlushQueueMax <= 0 {
-		cfg.Server.FlushQueueMax = 10000
-	}
-	if cfg.Server.FlushMaxRetry < 0 {
-		cfg.Server.FlushMaxRetry = 0
-	}
 	if cfg.Auth.TicketTTLSec <= 0 {
 		cfg.Auth.TicketTTLSec = 60
 	}
@@ -214,14 +206,20 @@ func applyDefaults(cfg *Config) {
 	if cfg.WS.MaxMessageBytes <= 0 {
 		cfg.WS.MaxMessageBytes = 64 * 1024
 	}
-	if cfg.DB.DSN == "" {
-		cfg.DB.DSN = "file:game_demo.db?cache=shared&_busy_timeout=5000"
+	if cfg.DB.DSNEnvKey == "" {
+		cfg.DB.DSNEnvKey = "GAME_DB_DSN"
 	}
-	if cfg.Cache.L1TTLSec <= 0 {
-		cfg.Cache.L1TTLSec = 30
+	if cfg.DB.MaxOpenConns <= 0 {
+		cfg.DB.MaxOpenConns = 20
 	}
-	if cfg.Cache.L2TTLSec <= 0 {
-		cfg.Cache.L2TTLSec = 300
+	if cfg.DB.MaxIdleConns <= 0 {
+		cfg.DB.MaxIdleConns = 10
+	}
+	if cfg.DB.ConnMaxLifetimeSeconds <= 0 {
+		cfg.DB.ConnMaxLifetimeSeconds = 1800
+	}
+	if cfg.DB.ConnMaxIdleTimeSeconds <= 0 {
+		cfg.DB.ConnMaxIdleTimeSeconds = 300
 	}
 	if cfg.State.OfflineTTLSec <= 0 {
 		cfg.State.OfflineTTLSec = 120

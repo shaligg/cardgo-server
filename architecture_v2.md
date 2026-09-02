@@ -58,7 +58,7 @@
 - 业务模块按服务边界写，后续可平滑拆分。
 - 高频在线热状态可以在本机内存。
 - 玩家权威数据必须在 DB。
-- Redis 用于 ticket nonce、session_index、短 TTL 跨进程状态。
+- Redis 当前用于 GameServer 节点注册、玩家节点归属和少量跨节点控制通知；ticket nonce 与连接 Session 暂存在各 GameServer 进程内存。
 
 ## 4. 运行形态
 
@@ -89,9 +89,9 @@ Go 运行模型：
   - WebSocket accept goroutine
   - 每连接读 goroutine
   - 每连接写 goroutine
-  - dispatcher shard goroutine
-  - flush worker goroutine
-  - metrics / health goroutine
+  - 请求 goroutine 内执行 dispatcher 分片锁与业务逻辑
+  - state maintainer goroutine
+  - GameServer 节点心跳 goroutine
 ```
 
 ## 5. MVP 必做模块
@@ -219,7 +219,6 @@ globalserver/* 是公共服编排层，MVP 就可以有代码，但不独立启�
 Gateway / Transport
   -> Handler / BizRouter
   -> Service
-  -> CachedRepository
   -> Repository
   -> Model
   -> DB
@@ -231,23 +230,22 @@ Gateway / Transport
 - `Handler` 只做协议参数解析和调用 Service。
 - `Service` 承载业务规则。
 - `Repository` 只做数据库访问。
-- `CachedRepository` 只做缓存策略，不写业务 SQL。
 - `Model` 是持久化模型，不直接暴露给客户端。
 
 ## 8. 数据分层
 
 ```text
-L1 GameServer 内存
+GameServer 本机内存
   - 在线热状态
   - 局内临时状态
   - 短时间断线恢复状态
 
-L2 Redis
-  - ticket nonce
-  - session_index
-  - 短 TTL 跨进程状态
+Redis 共享状态
+  - GameServer 节点注册
+  - 玩家节点归属
+  - 未来排行榜 ZSET 等公共数据
 
-L3 DB
+DB 持久化数据
   - 玩家权威数据
   - 资产
   - 卡牌
@@ -303,8 +301,9 @@ GameServer 只做：
 - Login 从 Redis 玩家归属读取最近节点，但不在签发 ticket 时改写归属。
 - GameServer 验票并绑定会话成功后，才原子更新 Redis `uid -> server_id + conn_id`。
 - 如果 Redis 前一归属仍是本节点，可恢复本机内存热状态；否则不复用旧状态，只从 DB 重建长期数据。
-- 原 GameServer 复用现有状态维护循环，每 `5` 秒批量核对归属并清理已迁移玩家的 `OnlineState/BattleSession`。
-- 离线状态和归属保留 `120` 秒作为原节点重连窗口与异常兜底，不使用节点间迁移通知。
+- 如果前一归属是其他节点，新 GameServer 通过 Redis Pub/Sub 通知原节点立即关闭指定旧连接；通知必须携带旧 `conn_id`，避免延迟消息误踢新会话。
+- 原 GameServer 仍通过状态维护循环每 `5` 秒批量核对归属并清理已迁移玩家的 `OnlineState/BattleSession`，作为 Pub/Sub 丢消息的兜底。
+- 离线状态和归属保留 `120` 秒，作为原节点重连窗口与最终异常兜底；Redis 不转发玩家业务请求。
 
 详细流程见：
 
@@ -350,7 +349,8 @@ MVP 第一条主链路：
 ```text
 独立单实例 LoginServer/Allocator
   -> 分配玩家到多个纯 GameServer 节点
-Redis 共享 session/nonce
+Redis 共享节点注册、玩家归属和控制通知
+各 GameServer 内存保存本节点 nonce 与连接 Session
 DB 共享权威数据
 ```
 

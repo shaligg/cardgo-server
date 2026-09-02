@@ -85,3 +85,49 @@ func TestServerStopWaitsForActiveHandler(t *testing.T) {
 		t.Fatal("Stop returned before active handler completed")
 	}
 }
+
+func TestKickConnectionRequiresMatchingUIDAndConnID(t *testing.T) {
+	server := NewServer(Options{})
+	client := NewClient("conn-a", "u1", nil, 1, time.Second, nil)
+	server.addClient(client)
+
+	if server.KickConnection("u2", "conn-a", "replaced") {
+		t.Fatal("mismatched uid should not be kicked")
+	}
+	select {
+	case <-client.closed:
+		t.Fatal("mismatched uid closed the connection")
+	default:
+	}
+
+	if !server.KickConnection("u1", "conn-a", "replaced") {
+		t.Fatal("matching uid and conn_id should be kicked")
+	}
+	select {
+	case <-client.sendQueue:
+	case <-time.After(time.Second):
+		t.Fatal("kick message was not queued")
+	}
+}
+
+func TestKickAllQueuesMessageForEveryClient(t *testing.T) {
+	server := NewServer(Options{})
+	clients := []*Client{
+		NewClient("conn-a", "u1", nil, 1, time.Second, nil),
+		NewClient("conn-b", "u2", nil, 1, time.Second, nil),
+	}
+	for _, client := range clients {
+		server.addClient(client)
+	}
+
+	if count := server.KickAll("server shutdown"); count != len(clients) {
+		t.Fatalf("kicked %d clients, want %d", count, len(clients))
+	}
+	for _, client := range clients {
+		select {
+		case <-client.sendQueue:
+		case <-time.After(time.Second):
+			t.Fatalf("kick message was not queued for %s", client.ConnID)
+		}
+	}
+}

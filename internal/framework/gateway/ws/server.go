@@ -329,7 +329,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
+			startedAt := time.Now()
 			resp, bizErr := s.bizHandler.Handle(r.Context(), uid, req.OpCode, req.Payload)
+			if s.metrics != nil {
+				s.metrics.ObserveWSBizDuration(time.Since(startedAt))
+			}
 			if bizErr != nil {
 				if !s.sendError(client, req.Seq, bizErr.Code, bizErr.Msg) {
 					return
@@ -554,6 +558,35 @@ func (s *Server) KickUID(ctx context.Context, uid string, reason string) {
 		return
 	}
 	s.kickClient(current.ConnID, reason)
+}
+
+// KickConnection 只关闭 UID 和连接 ID 都匹配的连接，避免延迟通知误踢新会话。
+func (s *Server) KickConnection(uid string, connID string, reason string) bool {
+	if uid == "" || connID == "" {
+		return false
+	}
+	s.mu.RLock()
+	client := s.clients[connID]
+	s.mu.RUnlock()
+	if client == nil || client.UID != uid {
+		return false
+	}
+	s.kickClient(connID, reason)
+	return true
+}
+
+// KickAll 向当前节点的所有客户端发送踢出通知并关闭连接。
+func (s *Server) KickAll(reason string) int {
+	s.mu.RLock()
+	connIDs := make([]string, 0, len(s.clients))
+	for connID := range s.clients {
+		connIDs = append(connIDs, connID)
+	}
+	s.mu.RUnlock()
+	for _, connID := range connIDs {
+		s.kickClient(connID, reason)
+	}
+	return len(connIDs)
 }
 
 func (s *Server) writeServerFullHTTP(w http.ResponseWriter) {
