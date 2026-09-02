@@ -3,6 +3,7 @@ package gameserver
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"sync"
@@ -31,6 +32,7 @@ import (
 	"github.com/bigfish/go_orm_1/internal/repo"
 )
 
+// Application 持有 GameServer 的运行组件和基础设施资源，并统一管理其生命周期。
 type Application struct {
 	cfg                   Config
 	bus                   eventbus.Bus
@@ -39,7 +41,8 @@ type Application struct {
 	wsServer              *ws.Server
 	stateMaintainer       *state.Maintainer
 	metricsReg            *imetrics.Registry
-	redisClient           *iredis.Client
+	dbPool                io.Closer
+	redisClient           io.Closer
 	playerKickBus         *iredis.PlayerKickBus
 	nodeRegistry          login.NodeRegistrar
 	nodeInfo              login.NodeInfo
@@ -96,6 +99,23 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		_ = redisClient.Close()
 		return nil, err
 	}
+	dbPool, err := gdb.DB()
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, fmt.Errorf("get mysql connection pool: %w", err)
+	}
+	bootstrapComplete := false
+	defer func() {
+		if bootstrapComplete {
+			return
+		}
+		if err := dbPool.Close(); err != nil {
+			ilog.Errorf("close mysql after bootstrap failure: %v", err)
+		}
+		if err := redisClient.Close(); err != nil {
+			ilog.Errorf("close redis after bootstrap failure: %v", err)
+		}
+	}()
 	dbRepo := repo.NewDBPlayerRepository(gdb)
 	if err := dbRepo.Migrate(); err != nil {
 		return nil, err
@@ -230,8 +250,7 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		Handler: buildAPIMux(cfg, adminToken, wsServer, metricsReg, sessionManager, loginService),
 	}
 
-	ilog.Infof("bootstrap done node=%s api=%s ws=%s", cfg.Server.NodeID, apiAddr, wsServer.Addr)
-	return &Application{
+	app := &Application{
 		cfg:             cfg,
 		bus:             eventbus.NewInProcBus(),
 		loginSvc:        loginService,
@@ -239,6 +258,7 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		wsServer:        wsServer,
 		stateMaintainer: stateMaintainer,
 		metricsReg:      metricsReg,
+		dbPool:          dbPool,
 		redisClient:     redisClient,
 		playerKickBus:   playerKickBus,
 		nodeRegistry:    nodeRegistry,
@@ -251,5 +271,8 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		},
 		nodeHeartbeatInterval: time.Duration(cfg.Redis.NodeHeartbeatSec) * time.Second,
 		nodeTTL:               time.Duration(cfg.Redis.NodeTTLSec) * time.Second,
-	}, nil
+	}
+	bootstrapComplete = true
+	ilog.Infof("bootstrap done node=%s api=%s ws=%s", cfg.Server.NodeID, apiAddr, wsServer.Addr)
+	return app, nil
 }

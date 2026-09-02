@@ -24,6 +24,16 @@ type recoveringNodeRegistrar struct {
 	once      sync.Once
 }
 
+type recordingCloser struct {
+	calls int
+	err   error
+}
+
+func (c *recordingCloser) Close() error {
+	c.calls++
+	return c.err
+}
+
 func (r *recoveringNodeRegistrar) UpsertNode(context.Context, login.NodeInfo, time.Duration) error {
 	r.mu.Lock()
 	r.calls++
@@ -60,11 +70,38 @@ func (r *recordingNodeRegistrar) RemoveNode(ctx context.Context, serverID string
 }
 
 func TestApplicationStartReturnsAPIListenError(t *testing.T) {
+	dbPool := &recordingCloser{}
+	redisClient := &recordingCloser{}
 	app := &Application{
-		apiServer: &http.Server{Addr: "127.0.0.1:not-a-port"},
+		apiServer:   &http.Server{Addr: "127.0.0.1:not-a-port"},
+		dbPool:      dbPool,
+		redisClient: redisClient,
 	}
 	if err := app.Start(context.Background()); err == nil {
 		t.Fatal("Start should return API listener error")
+	}
+	if dbPool.calls != 1 || redisClient.calls != 1 {
+		t.Fatalf("close calls db=%d redis=%d, want 1 each", dbPool.calls, redisClient.calls)
+	}
+}
+
+func TestCloseInfrastructureContinuesAfterCloseError(t *testing.T) {
+	dbErr := errors.New("close mysql failed")
+	dbPool := &recordingCloser{err: dbErr}
+	redisClient := &recordingCloser{}
+	app := &Application{dbPool: dbPool, redisClient: redisClient}
+
+	if err := app.closeInfrastructure(); !errors.Is(err, dbErr) {
+		t.Fatalf("closeInfrastructure error = %v, want %v", err, dbErr)
+	}
+	if dbPool.calls != 1 || redisClient.calls != 1 {
+		t.Fatalf("close calls db=%d redis=%d, want 1 each", dbPool.calls, redisClient.calls)
+	}
+	if err := app.closeInfrastructure(); err != nil {
+		t.Fatalf("second closeInfrastructure returned error: %v", err)
+	}
+	if dbPool.calls != 1 || redisClient.calls != 1 {
+		t.Fatalf("second close repeated calls db=%d redis=%d", dbPool.calls, redisClient.calls)
 	}
 }
 

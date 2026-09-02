@@ -16,7 +16,7 @@ import (
 func (a *Application) Start(ctx context.Context) error {
 	apiListener, err := net.Listen("tcp", a.apiServer.Addr)
 	if err != nil {
-		return fmt.Errorf("listen api %s: %w", a.apiServer.Addr, err)
+		return errors.Join(fmt.Errorf("listen api %s: %w", a.apiServer.Addr, err), a.closeInfrastructure())
 	}
 	if a.playerKickBus != nil {
 		if err := a.playerKickBus.Start(ctx, a.nodeInfo.ServerID, func(notice iredis.PlayerKickNotice) {
@@ -30,7 +30,7 @@ func (a *Application) Start(ctx context.Context) error {
 			}
 		}); err != nil {
 			_ = apiListener.Close()
-			return err
+			return errors.Join(err, a.closeInfrastructure())
 		}
 	}
 
@@ -39,7 +39,7 @@ func (a *Application) Start(ctx context.Context) error {
 		if a.playerKickBus != nil {
 			_ = a.playerKickBus.Stop()
 		}
-		return err
+		return errors.Join(err, a.closeInfrastructure())
 	}
 	if err := a.reportNode(ctx); err != nil {
 		_ = apiListener.Close()
@@ -47,7 +47,7 @@ func (a *Application) Start(ctx context.Context) error {
 		if a.playerKickBus != nil {
 			_ = a.playerKickBus.Stop()
 		}
-		return fmt.Errorf("register game server node: %w", err)
+		return errors.Join(fmt.Errorf("register game server node: %w", err), a.closeInfrastructure())
 	}
 	a.startNodeHeartbeat(ctx)
 	if a.stateMaintainer != nil {
@@ -96,13 +96,31 @@ func (a *Application) Stop(ctx context.Context) error {
 	if err := a.apiServer.Shutdown(shutdownCtx); err != nil && firstErr == nil {
 		firstErr = err
 	}
-	if a.redisClient != nil {
-		if err := a.redisClient.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
+	if err := a.closeInfrastructure(); err != nil && firstErr == nil {
+		firstErr = err
 	}
 	ilog.Infof("application stopped node=%s", a.cfg.Server.NodeID)
 	return firstErr
+}
+
+// closeInfrastructure 关闭 MySQL 和 Redis，并确保单项失败不阻断其他资源释放。
+func (a *Application) closeInfrastructure() error {
+	var closeErrors []error
+	if a.dbPool != nil {
+		dbPool := a.dbPool
+		a.dbPool = nil
+		if err := dbPool.Close(); err != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("close mysql: %w", err))
+		}
+	}
+	if a.redisClient != nil {
+		redisClient := a.redisClient
+		a.redisClient = nil
+		if err := redisClient.Close(); err != nil {
+			closeErrors = append(closeErrors, fmt.Errorf("close redis: %w", err))
+		}
+	}
+	return errors.Join(closeErrors...)
 }
 
 // reportNode 上报节点当前连接数和 drain 状态，供 LoginService 做准入分配。
