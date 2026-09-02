@@ -27,7 +27,7 @@ func NewDBPlayerRepository(db *gorm.DB) *DBPlayerRepository {
 //
 // 正式生产环境可以替换为独立 migration 工具，但 demo 阶段保留这里能简化启动流程。
 func (r *DBPlayerRepository) Migrate() error {
-	return r.db.AutoMigrate(&model.Player{}, &model.InventoryItem{}, &model.PlayerCard{}, &model.PlayerDeck{}, &model.PlayerWorkshop{}, &model.PlayerFacility{}, &model.AssetLog{})
+	return r.db.AutoMigrate(&model.Player{}, &model.InventoryItem{}, &model.PlayerCard{}, &model.PlayerDeck{}, &model.PlayerLevelProgress{}, &model.PlayerWorkshop{}, &model.PlayerFacility{}, &model.AssetLog{})
 }
 
 // GetByUID 查询玩家基础数据；玩家不存在时会创建默认数据。

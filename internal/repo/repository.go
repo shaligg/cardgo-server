@@ -76,6 +76,20 @@ type TxInventoryRepository interface {
 	ChangeInventoryItemInTx(ctx context.Context, tx *gorm.DB, uid string, itemID int64, delta int64, reason string, reqID string) (InventoryItem, error)
 }
 
+// PlayerLevelProgress 是业务层使用的玩家关卡通关记录。
+type PlayerLevelProgress struct {
+	UID            string `json:"uid"`
+	LevelID        int64  `json:"level_id"`
+	ClearCount     int64  `json:"clear_count"`
+	FirstClearedAt int64  `json:"first_cleared_at"`
+	LastClearedAt  int64  `json:"last_cleared_at"`
+}
+
+// LevelProgressRepository 定义关卡结算事务需要的进度写入能力。
+type LevelProgressRepository interface {
+	RecordLevelClearInTx(ctx context.Context, tx *gorm.DB, uid string, levelID int64) (PlayerLevelProgress, error)
+}
+
 // PlayerCard 是业务层使用的玩家卡牌拥有记录。
 type PlayerCard struct {
 	UID    string `json:"uid"`

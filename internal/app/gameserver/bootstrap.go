@@ -120,7 +120,7 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 	inventoryService := inventorygame.Service{Repo: dbRepo}
 	playerService := playergame.Service{Repo: dbRepo, Assets: assetService}
 	cardService := cardgame.Service{Repo: dbRepo, Assets: assetService, Tx: idb.NewTxManager(gdb), Data: gameData}
-	battleService := &battlegame.Service{Data: gameData, Assets: assetService, Tx: idb.NewTxManager(gdb)}
+	battleService := &battlegame.Service{Data: gameData, Assets: assetService, Tx: idb.NewTxManager(gdb), Progress: dbRepo}
 	workshopService := workshopgame.Service{Repo: dbRepo, Assets: assetService, Tx: idb.NewTxManager(gdb), Players: dbRepo, Data: workshopData}
 	onlineState := state.NewOnlineState()
 	shardExec := dispatcher.NewShardExecutor(cfg.Server.DispatcherShards)

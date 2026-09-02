@@ -113,6 +113,9 @@ func TestLevelFlowSettleGrantsRewardsOnce(t *testing.T) {
 	if !result.OK || result.CompletedOrders != 1 {
 		t.Fatalf("unexpected settle result: %+v", result)
 	}
+	if !result.FirstClear || result.Progress.ClearCount != 1 {
+		t.Fatalf("first settle progress = %+v, want first clear count 1", result.Progress)
+	}
 	if result.Player == nil || result.Player.Gold != 28 {
 		t.Fatalf("settle player = %+v, want gold 28", result.Player)
 	}
@@ -129,6 +132,45 @@ func TestLevelFlowSettleGrantsRewardsOnce(t *testing.T) {
 	}
 	if players.grantCalls != 1 || inventory.grantCalls != 1 {
 		t.Fatalf("repeated settle should not grant again, player_calls=%d inventory_calls=%d", players.grantCalls, inventory.grantCalls)
+	}
+}
+
+func TestSecondLevelClearUsesRepeatRewards(t *testing.T) {
+	players := &fakePlayerRepo{}
+	inventory := &fakeInventoryRepo{}
+	svc := newTestBattleService(t, players, inventory)
+
+	first, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("start first level: %v", err)
+	}
+	if _, err := svc.PlayCard(context.Background(), "u1", first.SessionID, 10001, "play-1"); err != nil {
+		t.Fatalf("play first level: %v", err)
+	}
+	if _, err := svc.SettleLevel(context.Background(), "u1", first.SessionID, "settle-1"); err != nil {
+		t.Fatalf("settle first level: %v", err)
+	}
+
+	second, err := svc.StartLevel(context.Background(), "u1", 1, "start-2")
+	if err != nil {
+		t.Fatalf("start repeated level: %v", err)
+	}
+	if _, err := svc.PlayCard(context.Background(), "u1", second.SessionID, 10001, "play-2"); err != nil {
+		t.Fatalf("play repeated level: %v", err)
+	}
+	result, err := svc.SettleLevel(context.Background(), "u1", second.SessionID, "settle-2")
+	if err != nil {
+		t.Fatalf("settle repeated level: %v", err)
+	}
+	if result.FirstClear || result.Progress.ClearCount != 2 {
+		t.Fatalf("repeat settle progress = %+v first_clear=%v", result.Progress, result.FirstClear)
+	}
+	// 首通共 28 金币，重复通关只发订单 8 + repeat_rewards 8。
+	if players.player.Gold != 44 {
+		t.Fatalf("gold after repeated clear = %d, want 44", players.player.Gold)
+	}
+	if inventory.items[gamedata.ItemIDBasicMaterial].Count != 2 {
+		t.Fatalf("repeat clear granted first-clear material again")
 	}
 }
 
@@ -205,7 +247,7 @@ func TestSettleLevelKeepsSessionUnsettledWhenRewardTransactionFails(t *testing.T
 	if err != nil {
 		t.Fatalf("retry SettleLevel returned error: %v", err)
 	}
-	if !result.OK || players.player.Gold != 28 {
+	if !result.OK || !result.FirstClear || result.Progress.ClearCount != 1 || players.player.Gold != 28 {
 		t.Fatalf("unexpected retry result=%+v gold=%d", result, players.player.Gold)
 	}
 }
@@ -242,6 +284,7 @@ func TestDeletePlayerRuntimeRemovesOnlyTargetPlayer(t *testing.T) {
 func newTestBattleService(t *testing.T, players repo.PlayerRepository, inventory repo.InventoryRepository) *Service {
 	t.Helper()
 	gdb := testdb.OpenGame(t)
+	progressRepo := repo.NewDBPlayerRepository(gdb)
 	items, err := gamedata.NewCatalog([]gamedata.ItemConfig{
 		{ItemID: gamedata.ItemIDGold, Key: "gold", StorageType: gamedata.StoragePlayerField, StorageKey: "gold", Stackable: true},
 		{ItemID: gamedata.ItemIDBasicMaterial, Key: "basic_material", StorageType: gamedata.StorageInventoryStack, Stackable: true},
@@ -304,8 +347,9 @@ func newTestBattleService(t *testing.T, players repo.PlayerRepository, inventory
 		t.Fatalf("NewGameData returned error: %v", err)
 	}
 	return &Service{
-		Data: data,
-		Tx:   idb.NewTxManager(gdb),
+		Data:     data,
+		Tx:       idb.NewTxManager(gdb),
+		Progress: progressRepo,
 		Assets: asset.Service{
 			Items:       items,
 			Players:     players,

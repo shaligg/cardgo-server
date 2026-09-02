@@ -54,6 +54,7 @@ func OpenGame(t testing.TB) *gorm.DB {
 		&model.InventoryItem{},
 		&model.PlayerCard{},
 		&model.PlayerDeck{},
+		&model.PlayerLevelProgress{},
 		&model.PlayerWorkshop{},
 		&model.PlayerFacility{},
 		&model.AssetLog{},

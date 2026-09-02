@@ -69,19 +69,22 @@ type PlayCardResult struct {
 
 // LevelSettleResult 是关卡结算结果。
 type LevelSettleResult struct {
-	OK              bool               `json:"ok"`
-	SessionID       string             `json:"level_session_id"`
-	LevelID         int64              `json:"level_id"`
-	CompletedOrders int64              `json:"completed_orders"`
-	Rewards         []asset.RewardItem `json:"rewards"`
-	Player          *repo.Player       `json:"-"`
+	OK              bool                     `json:"ok"`
+	SessionID       string                   `json:"level_session_id"`
+	LevelID         int64                    `json:"level_id"`
+	CompletedOrders int64                    `json:"completed_orders"`
+	FirstClear      bool                     `json:"first_clear"`
+	Rewards         []asset.RewardItem       `json:"rewards"`
+	Progress        repo.PlayerLevelProgress `json:"progress"`
+	Player          *repo.Player             `json:"-"`
 }
 
 // Service 是关卡运行时服务。
 type Service struct {
-	Data   *gamedata.GameData
-	Assets asset.Service
-	Tx     idb.TxManager
+	Data     *gamedata.GameData
+	Assets   asset.Service
+	Tx       idb.TxManager
+	Progress repo.LevelProgressRepository
 
 	mu       sync.Mutex
 	sessions map[string]*runtimeSession
@@ -193,27 +196,34 @@ func (s *Service) SettleLevel(ctx context.Context, uid string, sessionID string,
 		return LevelSettleResult{}, ErrLevelNotComplete
 	}
 
-	rewards := append([]asset.RewardItem(nil), rs.pendingRewards...)
-	for _, reward := range rs.level.FirstClearRewards {
-		rewards = append(rewards, asset.RewardItem{ItemID: reward.ItemID, Count: reward.Count})
-	}
 	result := LevelSettleResult{
 		OK:              true,
 		SessionID:       rs.state.SessionID,
 		LevelID:         rs.state.LevelID,
 		CompletedOrders: rs.state.CompletedOrders,
-		Rewards:         rewards,
 	}
 
-	if len(rewards) > 0 {
-		var changes []asset.ChangeResult
-		if err := s.Tx.Do(ctx, func(tx *gorm.DB) error {
-			var err error
-			changes, err = s.Assets.ApplyRewardInTx(ctx, tx, uid, rewards, "level.settle", reqID)
-			return err
-		}); err != nil {
-			return LevelSettleResult{}, err
+	var changes []asset.ChangeResult
+	if err := s.Tx.Do(ctx, func(tx *gorm.DB) error {
+		if s.Progress == nil {
+			return fmt.Errorf("level progress repository is nil")
 		}
+		progress, err := s.Progress.RecordLevelClearInTx(ctx, tx, uid, rs.state.LevelID)
+		if err != nil {
+			return err
+		}
+		result.Progress = progress
+		result.FirstClear = progress.ClearCount == 1
+		result.Rewards = buildSettleRewards(rs, result.FirstClear)
+		if len(result.Rewards) == 0 {
+			return nil
+		}
+		changes, err = s.Assets.ApplyRewardInTx(ctx, tx, uid, result.Rewards, "level.settle", reqID)
+		return err
+	}); err != nil {
+		return LevelSettleResult{}, err
+	}
+	if len(changes) > 0 {
 		for _, change := range changes {
 			if change.Player != nil {
 				player := *change.Player
@@ -224,6 +234,19 @@ func (s *Service) SettleLevel(ctx context.Context, uid string, sessionID string,
 	rs.state.Settled = true
 	rs.settleResult = &result
 	return result, nil
+}
+
+// buildSettleRewards 合并本局订单奖励，并按进度选择首通或重复通关奖励。
+func buildSettleRewards(rs *runtimeSession, firstClear bool) []asset.RewardItem {
+	rewards := append([]asset.RewardItem(nil), rs.pendingRewards...)
+	configured := rs.level.RepeatRewards
+	if firstClear {
+		configured = rs.level.FirstClearRewards
+	}
+	for _, reward := range configured {
+		rewards = append(rewards, asset.RewardItem{ItemID: reward.ItemID, Count: reward.Count})
+	}
+	return rewards
 }
 
 func (s *Service) initLocked() {

@@ -325,7 +325,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 - 配置 ID 冲突、缺字段、引用不存在能被校验出来。
 
 ### 8.4 B3 关卡主链路
-当前进度：DONE。已完成内存版关卡运行时、`level.start(1301)`、`level.play_card(1302)`、`level.settle(1303)`、结算事务发奖和 WS smoke；玩家卡组读取已移入 B4，B3 使用关卡 `fixed_cards` 作为 MVP 关卡入口。
+当前进度：DONE。已完成内存版关卡运行时、`level.start(1301)`、`level.play_card(1302)`、`level.settle(1303)`、关卡进度持久化、首通/重复奖励选择、结算事务发奖和 WS smoke；玩家卡组读取已移入 B4，B3 使用关卡 `fixed_cards` 作为 MVP 关卡入口。
 
 目标：
 
@@ -339,6 +339,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 4. DONE：实现订单完成判定。
 5. DONE：实现关卡结算并在事务内调用 `AssetService.ApplyRewardInTx`。
 6. DONE：增加关卡 smoke test。
+7. DONE：结算事务原子写入玩家关卡通关次数；首次通关使用 `first_clear_rewards`，后续通关使用 `repeat_rewards`。
 
 验收：
 
