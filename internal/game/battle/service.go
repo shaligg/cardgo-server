@@ -86,11 +86,14 @@ type Service struct {
 	Tx       idb.TxManager
 	Progress repo.LevelProgressRepository
 
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	sessions map[string]*runtimeSession
 }
 
 type runtimeSession struct {
+	mu             sync.Mutex
+	uid            string
+	deleted        bool
 	state          LevelSession
 	level          gamedata.LevelConfig
 	nextOrderIndex int
@@ -108,16 +111,13 @@ func (s *Service) StartLevel(ctx context.Context, uid string, levelID int64, req
 		return LevelSession{}, ErrGameDataMissing
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.initLocked()
-
 	level, ok := s.Data.Levels[levelID]
 	if !ok {
 		return LevelSession{}, fmt.Errorf("%w: %d", ErrLevelNotFound, levelID)
 	}
 
 	rs := &runtimeSession{
+		uid:            uid,
 		level:          level,
 		nextOrderIndex: 0,
 		state: LevelSession{
@@ -136,7 +136,10 @@ func (s *Service) StartLevel(ctx context.Context, uid string, levelID int64, req
 		rs.state.ActiveOrders = append(rs.state.ActiveOrders, s.nextOrder(rs))
 	}
 
+	s.mu.Lock()
+	s.initLocked()
 	s.sessions[rs.state.SessionID] = rs
+	s.mu.Unlock()
 	return cloneSession(rs.state), nil
 }
 
@@ -146,13 +149,11 @@ func (s *Service) PlayCard(ctx context.Context, uid string, sessionID string, ca
 	if reqID == "" {
 		return PlayCardResult{}, ErrInvalidReqID
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	rs, err := s.getSessionLocked(uid, sessionID)
+	rs, err := s.lockSession(uid, sessionID)
 	if err != nil {
 		return PlayCardResult{}, err
 	}
+	defer rs.mu.Unlock()
 	if s.Data == nil {
 		return PlayCardResult{}, ErrGameDataMissing
 	}
@@ -183,12 +184,11 @@ func (s *Service) SettleLevel(ctx context.Context, uid string, sessionID string,
 		return LevelSettleResult{}, ErrInvalidReqID
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	rs, err := s.getSessionLocked(uid, sessionID)
+	rs, err := s.lockSession(uid, sessionID)
 	if err != nil {
 		return LevelSettleResult{}, err
 	}
+	defer rs.mu.Unlock()
 	if rs.settleResult != nil {
 		return *rs.settleResult, nil
 	}
@@ -255,10 +255,17 @@ func (s *Service) initLocked() {
 	}
 }
 
-func (s *Service) getSessionLocked(uid string, sessionID string) (*runtimeSession, error) {
-	s.initLocked()
+// lockSession 获取并锁定单个关卡会话；调用方必须在返回成功后解锁 rs.mu。
+func (s *Service) lockSession(uid string, sessionID string) (*runtimeSession, error) {
+	s.mu.RLock()
 	rs := s.sessions[sessionID]
-	if rs == nil || rs.state.UID != uid {
+	s.mu.RUnlock()
+	if rs == nil || rs.uid != uid {
+		return nil, ErrSessionNotFound
+	}
+	rs.mu.Lock()
+	if rs.deleted {
+		rs.mu.Unlock()
 		return nil, ErrSessionNotFound
 	}
 	return rs, nil
@@ -266,13 +273,12 @@ func (s *Service) getSessionLocked(uid string, sessionID string) (*runtimeSessio
 
 // PlayerUIDs 返回当前节点仍保存局内状态的玩家 UID。
 func (s *Service) PlayerUIDs() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.initLocked()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	seen := make(map[string]struct{}, len(s.sessions))
 	out := make([]string, 0, len(s.sessions))
 	for _, runtime := range s.sessions {
-		uid := runtime.state.UID
+		uid := runtime.uid
 		if uid == "" {
 			continue
 		}
@@ -287,16 +293,26 @@ func (s *Service) PlayerUIDs() []string {
 
 // DeletePlayerRuntime 删除指定玩家在当前节点的全部关卡运行时。
 func (s *Service) DeletePlayerRuntime(uid string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.initLocked()
-	deleted := 0
+	s.mu.RLock()
+	targets := make(map[string]*runtimeSession)
 	for sessionID, runtime := range s.sessions {
-		if runtime.state.UID != uid {
-			continue
+		if runtime.uid == uid {
+			targets[sessionID] = runtime
 		}
-		delete(s.sessions, sessionID)
-		deleted++
+	}
+	s.mu.RUnlock()
+
+	deleted := 0
+	for sessionID, runtime := range targets {
+		runtime.mu.Lock()
+		runtime.deleted = true
+		s.mu.Lock()
+		if s.sessions[sessionID] == runtime {
+			delete(s.sessions, sessionID)
+			deleted++
+		}
+		s.mu.Unlock()
+		runtime.mu.Unlock()
 	}
 	return deleted
 }

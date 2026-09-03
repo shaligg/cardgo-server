@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/bigfish/go_orm_1/internal/game/asset"
 	"github.com/bigfish/go_orm_1/internal/gamedata"
@@ -17,6 +18,18 @@ type fakePlayerRepo struct {
 	player        repo.Player
 	grantCalls    int
 	failNextGrant bool
+}
+
+type blockingPlayerRepo struct {
+	fakePlayerRepo
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingPlayerRepo) ChangeGoldInTx(ctx context.Context, tx *gorm.DB, uid string, delta int64, itemID int64, reason string, reqID string) (repo.Player, error) {
+	close(r.entered)
+	<-r.release
+	return r.fakePlayerRepo.ChangeGoldInTx(ctx, tx, uid, delta, itemID, reason, reqID)
 }
 
 func (r *fakePlayerRepo) GetByUID(ctx context.Context, uid string) (repo.Player, error) {
@@ -278,6 +291,60 @@ func TestDeletePlayerRuntimeRemovesOnlyTargetPlayer(t *testing.T) {
 	}
 	if restarted.SessionID == first.SessionID {
 		t.Fatal("new runtime reused the deleted session id")
+	}
+}
+
+func TestDifferentPlayersDoNotShareBattleSessionLock(t *testing.T) {
+	players := &blockingPlayerRepo{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc := newTestBattleService(t, players, &fakeInventoryRepo{})
+
+	first, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("start u1: %v", err)
+	}
+	second, err := svc.StartLevel(context.Background(), "u2", 1, "start-2")
+	if err != nil {
+		t.Fatalf("start u2: %v", err)
+	}
+	if _, err := svc.PlayCard(context.Background(), "u1", first.SessionID, 10001, "play-1"); err != nil {
+		t.Fatalf("play u1: %v", err)
+	}
+
+	settleDone := make(chan error, 1)
+	go func() {
+		_, err := svc.SettleLevel(context.Background(), "u1", first.SessionID, "settle-1")
+		settleDone <- err
+	}()
+	select {
+	case <-players.entered:
+	case <-time.After(time.Second):
+		t.Fatal("u1 settlement did not enter the blocking repository")
+	}
+
+	playDone := make(chan error, 1)
+	go func() {
+		_, err := svc.PlayCard(context.Background(), "u2", second.SessionID, 10001, "play-2")
+		playDone <- err
+	}()
+	var playErr error
+	timedOut := false
+	select {
+	case playErr = <-playDone:
+	case <-time.After(time.Second):
+		timedOut = true
+	}
+	close(players.release)
+	if err := <-settleDone; err != nil {
+		t.Fatalf("settle u1: %v", err)
+	}
+	if timedOut {
+		t.Fatal("u2 play was blocked by u1 settlement")
+	}
+	if playErr != nil {
+		t.Fatalf("play u2: %v", playErr)
 	}
 }
 
