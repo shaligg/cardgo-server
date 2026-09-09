@@ -1284,8 +1284,7 @@ go_game_server/
 │   │   │   ├── ticket_verifier.go
 │   │   │   └── nonce_store.go
 │   │   ├── session/
-│   │   │   ├── manager.go
-│   │   │   └── store.go
+│   │   │   └── manager.go
 │   │   ├── state/
 │   │   │   ├── online_state.go
 │   │   │   └── maintainer.go
