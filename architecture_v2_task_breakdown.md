@@ -253,10 +253,11 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 12. DONE：BattleSession 改为按 UID 索引，一个玩家最多保留一局运行态；未结算时禁止覆盖，结算后新开局替换旧运行态，旧 `session_id` 失效。
 13. DONE：删除没有任何发布或订阅调用方的进程内 EventBus；真实跨领域异步编排出现前只保留事件契约，不预建运行模块。
 14. DONE：删除没有实现和调用方的 `session.Store` 预留接口；当前会话由进程内 `Manager` 管理，跨节点只通过 Redis `PlayerOwnerStore` 保存归属。
-15. TODO：在独立压测机执行 P5 正式压测并回填容量结论。
-16. TODO：在预发环境执行 P6 灰度发布和故障注入演练，补充演练记录。
-17. 不新增无调用方的架构预留模块；按以上顺序一次修复一个现有问题。
-18. DEFERRED：监控确认重复 DB 读取成为瓶颈后，再按技术架构 7.6 节实现 `OnlinePlayerStore`；实施前必须先完成跨节点单写者 fencing，当前 Demo 不提前增加该调用链。
+15. DONE：删除无人调用的 `SingleNodeAllocator`；单节点 Demo 与未来多节点统一使用 Redis `NodeRegistry` 驱动的 `RegistryNodeAllocator`。
+16. TODO：在独立压测机执行 P5 正式压测并回填容量结论。
+17. TODO：在预发环境执行 P6 灰度发布和故障注入演练，补充演练记录。
+18. 不新增无调用方的架构预留模块；按以上顺序一次修复一个现有问题。
+19. DEFERRED：监控确认重复 DB 读取成为瓶颈后，再按技术架构 7.6 节实现 `OnlinePlayerStore`；实施前必须先完成跨节点单写者 fencing，当前 Demo 不提前增加该调用链。
 
 ## 8. 卡牌 MVP 后续任务拆分
 

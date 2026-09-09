@@ -122,22 +122,6 @@ func (a RegistryNodeAllocator) Allocate(ctx context.Context, uid string, clientI
 	return node.ServerID, node.WSAddr, nil
 }
 
-// SingleNodeAllocator 是最小 demo 分配器。
-//
-// 新代码优先使用 RegistryNodeAllocator；保留它是为了简单测试或脚本场景。
-type SingleNodeAllocator struct {
-	ServerID string
-	WSAddr   string
-}
-
-// Allocate 总是返回配置中的单个 GameServer。
-func (a SingleNodeAllocator) Allocate(ctx context.Context, uid string, clientIP string) (string, string, error) {
-	_ = ctx
-	_ = uid
-	_ = clientIP
-	return a.ServerID, a.WSAddr, nil
-}
-
 func findAvailableNode(nodes []NodeInfo, serverID string) (NodeInfo, bool) {
 	for _, node := range nodes {
 		if node.ServerID == serverID && node.Available() {
