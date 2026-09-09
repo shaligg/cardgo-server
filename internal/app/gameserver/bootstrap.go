@@ -34,11 +34,9 @@ import (
 // Application 持有 GameServer 的运行组件和基础设施资源，并统一管理其生命周期。
 type Application struct {
 	cfg                   Config
-	loginSvc              login.Provider
 	apiServer             *http.Server
 	wsServer              *ws.Server
 	stateMaintainer       *state.Maintainer
-	metricsReg            *imetrics.Registry
 	dbPool                io.Closer
 	redisClient           io.Closer
 	playerKickBus         *iredis.PlayerKickBus
@@ -250,11 +248,9 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 
 	app := &Application{
 		cfg:             cfg,
-		loginSvc:        loginService,
 		apiServer:       apiServer,
 		wsServer:        wsServer,
 		stateMaintainer: stateMaintainer,
-		metricsReg:      metricsReg,
 		dbPool:          dbPool,
 		redisClient:     redisClient,
 		playerKickBus:   playerKickBus,
