@@ -18,6 +18,7 @@ import (
 	playergame "github.com/bigfish/go_orm_1/internal/game/player"
 	workshopgame "github.com/bigfish/go_orm_1/internal/game/workshop"
 	"github.com/bigfish/go_orm_1/internal/gamedata"
+	"github.com/bigfish/go_orm_1/internal/globalcore"
 	"github.com/bigfish/go_orm_1/internal/handler"
 	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	ilog "github.com/bigfish/go_orm_1/internal/infra/log"
@@ -138,6 +139,11 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 	cardService := cardgame.Service{Repo: dbRepo, Assets: assetService, Tx: idb.NewTxManager(gdb), Data: gameData}
 	battleService := &battlegame.Service{Data: gameData, Assets: assetService, Tx: idb.NewTxManager(gdb), Progress: dbRepo}
 	workshopService := workshopgame.Service{Repo: dbRepo, Assets: assetService, Tx: idb.NewTxManager(gdb), Players: dbRepo, Data: workshopData}
+	publicCore := globalcore.Core{
+		Friend: globalcore.LocalFriendService{Repo: dbRepo},
+		Guild:  globalcore.LocalGuildService{Repo: dbRepo},
+		Chat:   globalcore.LocalChatService{Messages: dbRepo, Membership: dbRepo},
+	}
 	onlineState := state.NewOnlineState()
 	shardExec := dispatcher.NewShardExecutor(cfg.Server.DispatcherShards)
 	commandCache := session.NewCommandCache(time.Duration(cfg.State.OfflineTTLSec)*time.Second, 10, 16*1024)
@@ -153,6 +159,9 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		CardService:      cardService,
 		BattleService:    battleService,
 		WorkshopService:  workshopService,
+		FriendService:    publicCore.Friend,
+		GuildService:     publicCore.Guild,
+		ChatService:      publicCore.Chat,
 		Searcher:         searchClient,
 		Online:           onlineState,
 	}

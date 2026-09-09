@@ -50,6 +50,104 @@ var ErrCardMaxLevel = errors.New("card already max level")
 // ErrFacilityMaxLevel 表示设施已经达到当前版本等级上限。
 var ErrFacilityMaxLevel = errors.New("facility already max level")
 
+// 公共社交域的状态错误由仓储返回，LocalService 和未来 RemoteClient 共用同一语义。
+var (
+	ErrSocialPlayerNotFound     = errors.New("player not found")
+	ErrFriendRequestExists      = errors.New("friend request already exists")
+	ErrFriendRequestNotFound    = errors.New("friend request not found")
+	ErrFriendRelationNotFound   = errors.New("friend relation not found")
+	ErrAlreadyFriends           = errors.New("players are already friends")
+	ErrGuildNameTaken           = errors.New("guild name already exists")
+	ErrGuildNotFound            = errors.New("guild not found")
+	ErrAlreadyInGuild           = errors.New("player already belongs to a guild")
+	ErrNotGuildMember           = errors.New("player is not a guild member")
+	ErrGuildPermissionDenied    = errors.New("guild permission denied")
+	ErrGuildApplicationExists   = errors.New("guild application already exists")
+	ErrGuildApplicationNotFound = errors.New("guild application not found")
+)
+
+const (
+	FriendStatusPending  = "pending"
+	FriendStatusAccepted = "accepted"
+	GuildRoleLeader      = "leader"
+	GuildRoleMember      = "member"
+)
+
+// FriendRecord 是好友仓储返回的一条关系记录。
+type FriendRecord struct {
+	OtherUID     string
+	RequesterUID string
+	Level        int
+	Nickname     string
+	Status       string
+}
+
+// FriendRepository 定义好友关系持久化能力。
+type FriendRepository interface {
+	CreateFriendRequest(ctx context.Context, uid string, targetUID string, reqID string) error
+	ApproveFriendRequest(ctx context.Context, uid string, targetUID string, reqID string) error
+	DeleteFriendRelation(ctx context.Context, uid string, targetUID string) error
+	ListFriendRelations(ctx context.Context, uid string, afterID uint64, limit int) ([]FriendRecord, uint64, error)
+}
+
+// GuildMemberRecord 是公会成员仓储 DTO。
+type GuildMemberRecord struct {
+	UID      string
+	Role     string
+	JoinedAt int64
+}
+
+// GuildRecord 是公会查询仓储 DTO。
+type GuildRecord struct {
+	GuildID     string
+	Name        string
+	OwnerUID    string
+	MemberCount int
+	MyRole      string
+	JoinStatus  string
+	Members     []GuildMemberRecord
+}
+
+// GuildApplicationRecord 是待审批入会申请的仓储 DTO。
+type GuildApplicationRecord struct {
+	UID       string
+	Level     int
+	Nickname  string
+	CreatedAt int64
+}
+
+// GuildRepository 定义公会主体、成员和申请的持久化能力。
+type GuildRepository interface {
+	CreateGuild(ctx context.Context, uid string, guildID string, name string, reqID string) (GuildRecord, error)
+	SearchGuilds(ctx context.Context, uid string, keyword string, afterID uint64, limit int) ([]GuildRecord, uint64, error)
+	GetGuild(ctx context.Context, uid string, guildID string) (GuildRecord, error)
+	ListGuildApplications(ctx context.Context, operatorUID string, guildID string, afterID uint64, limit int) ([]GuildApplicationRecord, uint64, error)
+	CreateGuildApplication(ctx context.Context, uid string, guildID string, reqID string) error
+	ApproveGuildApplication(ctx context.Context, operatorUID string, guildID string, targetUID string, reqID string) error
+	LeaveGuild(ctx context.Context, uid string) error
+}
+
+// GuildMembershipReader 只暴露聊天解析当前公会频道需要的成员查询。
+type GuildMembershipReader interface {
+	GetGuildIDByUID(ctx context.Context, uid string) (string, error)
+}
+
+// ChatMessageRecord 是聊天仓储 DTO。
+type ChatMessageRecord struct {
+	MsgID     string
+	ChannelID string
+	UID       string
+	Content   string
+	ReqID     string
+	CreatedAt int64
+}
+
+// ChatRepository 定义聊天消息持久化和历史查询能力。
+type ChatRepository interface {
+	CreateChatMessage(ctx context.Context, message ChatMessageRecord) (ChatMessageRecord, error)
+	ListChatMessages(ctx context.Context, channelID string, beforeID uint64, limit int) ([]ChatMessageRecord, uint64, error)
+}
+
 // PlayerRepository 定义玩家基础数据的持久化能力。
 //
 // ChangeGold 必须在实现中保证资产变更和资产流水处于同一事务。

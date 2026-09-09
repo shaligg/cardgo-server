@@ -8,6 +8,7 @@ import (
 	battlesvc "github.com/bigfish/go_orm_1/internal/game/battle"
 	cardsvc "github.com/bigfish/go_orm_1/internal/game/card"
 	workshopsvc "github.com/bigfish/go_orm_1/internal/game/workshop"
+	"github.com/bigfish/go_orm_1/internal/globalcore"
 	"github.com/bigfish/go_orm_1/internal/platform/state"
 	"github.com/bigfish/go_orm_1/internal/repo"
 )
@@ -38,7 +39,13 @@ func isInvalidRequestError(err error) bool {
 		errors.Is(err, assetsvc.ErrUnsupportedStorage) ||
 		errors.Is(err, battlesvc.ErrInvalidReqID) ||
 		errors.Is(err, battlesvc.ErrCardNotInSession) ||
-		errors.Is(err, cardsvc.ErrInvalidDeck)
+		errors.Is(err, cardsvc.ErrInvalidDeck) ||
+		errors.Is(err, globalcore.ErrInvalidCursor) ||
+		errors.Is(err, globalcore.ErrInvalidListLimit) ||
+		errors.Is(err, globalcore.ErrCannotFriendSelf) ||
+		errors.Is(err, globalcore.ErrInvalidGuildName) ||
+		errors.Is(err, globalcore.ErrInvalidChatChannel) ||
+		errors.Is(err, globalcore.ErrInvalidChatContent)
 }
 
 func isNotFoundError(err error) bool {
@@ -48,7 +55,12 @@ func isNotFoundError(err error) bool {
 		errors.Is(err, battlesvc.ErrSessionNotFound) ||
 		errors.Is(err, battlesvc.ErrCardNotFound) ||
 		errors.Is(err, cardsvc.ErrCardNotFound) ||
-		errors.Is(err, workshopsvc.ErrFacilityNotFound)
+		errors.Is(err, workshopsvc.ErrFacilityNotFound) ||
+		errors.Is(err, globalcore.ErrPlayerNotFound) ||
+		errors.Is(err, globalcore.ErrFriendRequestNotFound) ||
+		errors.Is(err, globalcore.ErrFriendRelationNotFound) ||
+		errors.Is(err, globalcore.ErrGuildNotFound) ||
+		errors.Is(err, globalcore.ErrGuildApplicationNotFound)
 }
 
 func isInsufficientResourceError(err error) bool {
@@ -64,7 +76,14 @@ func isAlreadyMaxError(err error) bool {
 
 func isPreconditionFailedError(err error) bool {
 	return errors.Is(err, battlesvc.ErrLevelNotComplete) ||
-		errors.Is(err, battlesvc.ErrBattleInProgress)
+		errors.Is(err, battlesvc.ErrBattleInProgress) ||
+		errors.Is(err, globalcore.ErrFriendRequestExists) ||
+		errors.Is(err, globalcore.ErrAlreadyFriends) ||
+		errors.Is(err, globalcore.ErrGuildNameTaken) ||
+		errors.Is(err, globalcore.ErrAlreadyInGuild) ||
+		errors.Is(err, globalcore.ErrNotGuildMember) ||
+		errors.Is(err, globalcore.ErrGuildPermissionDenied) ||
+		errors.Is(err, globalcore.ErrGuildApplicationExists)
 }
 
 // syncOnlinePlayerState 把最新玩家快照写入在线热状态。

@@ -84,3 +84,84 @@ type WebSearchResponse struct {
 	Results  []WebSearchResult `json:"results"`
 	TimedOut bool              `json:"timed_out"`
 }
+
+// FriendApplyRequest 是好友申请请求；操作玩家由鉴权 UID 决定，payload 只提交目标玩家。
+type FriendApplyRequest struct {
+	TargetUID string `json:"target_uid"`
+	ReqID     string `json:"req_id"`
+}
+
+// FriendApproveRequest 是同意好友申请请求。
+type FriendApproveRequest struct {
+	TargetUID string `json:"target_uid"`
+	ReqID     string `json:"req_id"`
+}
+
+// FriendRemoveRequest 是删除好友或撤销申请请求。
+type FriendRemoveRequest struct {
+	TargetUID string `json:"target_uid"`
+	ReqID     string `json:"req_id"`
+}
+
+// FriendListRequest 是好友关系分页请求，cursor 由上次响应原样回传。
+type FriendListRequest struct {
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// GuildCreateRequest 是创建公会请求。
+type GuildCreateRequest struct {
+	Name  string `json:"name"`
+	ReqID string `json:"req_id"`
+}
+
+// GuildSearchRequest 是按名称搜索公会的分页请求。
+type GuildSearchRequest struct {
+	Keyword string `json:"keyword,omitempty"`
+	Cursor  string `json:"cursor,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+}
+
+// GuildApplyJoinRequest 是申请加入公会请求。
+type GuildApplyJoinRequest struct {
+	GuildID string `json:"guild_id"`
+	ReqID   string `json:"req_id"`
+}
+
+// GuildApproveJoinRequest 是会长审批入会申请请求。
+type GuildApproveJoinRequest struct {
+	GuildID   string `json:"guild_id"`
+	TargetUID string `json:"target_uid"`
+	ReqID     string `json:"req_id"`
+}
+
+// GuildLeaveRequest 是退出公会请求。
+type GuildLeaveRequest struct {
+	ReqID string `json:"req_id"`
+}
+
+// GuildGetRequest 查询指定公会；guild_id 为空时查询自己的公会。
+type GuildGetRequest struct {
+	GuildID string `json:"guild_id,omitempty"`
+}
+
+// GuildListApplicationsRequest 是会长查询待审批申请的分页请求。
+type GuildListApplicationsRequest struct {
+	GuildID string `json:"guild_id"`
+	Cursor  string `json:"cursor,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+}
+
+// ChatSendRequest 向世界或当前公会频道发送消息。
+type ChatSendRequest struct {
+	Channel string `json:"channel"`
+	Content string `json:"content"`
+	ReqID   string `json:"req_id"`
+}
+
+// ChatHistoryRequest 拉取世界或当前公会频道历史消息。
+type ChatHistoryRequest struct {
+	Channel string `json:"channel"`
+	Cursor  string `json:"cursor,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+}

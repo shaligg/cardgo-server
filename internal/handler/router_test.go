@@ -51,3 +51,26 @@ func TestRegisterBizRoutesCanEnableDebugOps(t *testing.T) {
 		}
 	}
 }
+
+func TestRegisterBizRoutesIncludesLightSocialOps(t *testing.T) {
+	router := NewRegisteredRouter(&BizHandler{}, false)
+	for _, opCode := range []int32{
+		protocol.OpFriendApply,
+		protocol.OpFriendApprove,
+		protocol.OpFriendRemove,
+		protocol.OpFriendList,
+		protocol.OpGuildCreate,
+		protocol.OpGuildSearch,
+		protocol.OpGuildApplyJoin,
+		protocol.OpGuildApproveJoin,
+		protocol.OpGuildLeave,
+		protocol.OpGuildGet,
+		protocol.OpGuildListApplications,
+		protocol.OpChatSend,
+		protocol.OpChatHistory,
+	} {
+		if _, ok := router.handlers[opCode]; !ok {
+			t.Fatalf("social op_code %d is not registered", opCode)
+		}
+	}
+}

@@ -25,4 +25,20 @@ const (
 	OpWorkshopClaimOffline    int32 = 1403
 
 	OpWebSearch int32 = 1501
+
+	OpFriendApply   int32 = 1601
+	OpFriendApprove int32 = 1602
+	OpFriendRemove  int32 = 1603
+	OpFriendList    int32 = 1604
+
+	OpGuildCreate           int32 = 1701
+	OpGuildSearch           int32 = 1702
+	OpGuildApplyJoin        int32 = 1703
+	OpGuildApproveJoin      int32 = 1704
+	OpGuildLeave            int32 = 1705
+	OpGuildGet              int32 = 1706
+	OpGuildListApplications int32 = 1707
+
+	OpChatSend    int32 = 1801
+	OpChatHistory int32 = 1802
 )

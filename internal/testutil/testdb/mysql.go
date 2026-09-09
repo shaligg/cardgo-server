@@ -58,5 +58,10 @@ func OpenGame(t testing.TB) *gorm.DB {
 		&model.PlayerWorkshop{},
 		&model.PlayerFacility{},
 		&model.AssetLog{},
+		&model.FriendRelation{},
+		&model.Guild{},
+		&model.GuildMember{},
+		&model.GuildApplication{},
+		&model.ChatMessage{},
 	)
 }

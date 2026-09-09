@@ -365,13 +365,13 @@
 
 ## 5. 第三批细节文档任务
 
-### 5.1 社交互助系统文档
+### 5.1 轻社交系统文档
 
 负责人：系统策划
 
 建议文件：
 
-- `docs/design/social_assist_design.md`
+- `docs/design/social_chat_guild_design.md`
 
 优先级：P2
 
@@ -459,4 +459,3 @@
 6. 数值评审经济影响。
 
 评审通过后再进入开发任务拆分。
-

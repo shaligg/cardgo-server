@@ -69,7 +69,7 @@
 2. `login` 与 `realtime` 通过接口边界交互，不直接共享内部实现细节。
 3. GM 后台为独立系统，不进入实时主链路。
 4. 当前阶段不引入策划分服逻辑；只保留性能扩容能力。
-5. 好友/聊天/公会/邮件/排行完整业务后置，但 `globalcore/globalserver` 代码边界从 MVP 起建立。
+5. 好友/聊天/公会基础闭环已在 `globalcore` 落地；互助、公会成长、聊天治理及邮件/排行完整业务后置。
 6. Demo 阶段优先“可用闭环”，生产增强项（复杂风控、跨地域容灾）后置。
 7. `globalcore` 以同进程公共领域核心存在；`globalserver` 在 MVP 就建立代码边界，但不独立启动、不做网络传输层。
 
@@ -310,9 +310,9 @@ MVP:
 | `login` | `internal/platform/login` | 独立单实例 LoginServer | 接口化，ticket/allocator DTO 稳定 | 单节点 Demo 同进程；增加 GameServer 前先拆启动入口 |
 | `globalcore/rank` | GameServer 同进程 | 独立 RankService 或 GlobalServer 复用 | `RankService` 接口，支持 `LocalRankService` 与 `RemoteRankClient`；排行奖励规则也放这里复用 | 可先本地实现 |
 | `globalcore/mail` | GameServer 同进程 | 独立 MailService 或 GlobalServer 复用 | 接口化，发放/领取幂等，附件持久化，批量邮件规则可复用 | 可先占位或简化 |
-| `globalcore/chat` | GameServer 同进程 | 独立 ChatService 或 GlobalServer 复用 | 接口化，不依赖本机连接对象，消息可持久化或短期缓存 | MVP 可只占位 |
-| `globalcore/guild` | GameServer 同进程 | 独立 GuildService 或 GlobalServer 复用 | 接口化，公会数据以 DB/Redis 为权威，公会权限规则可复用 | MVP 可只占位 |
-| `globalcore/friend` | GameServer 同进程 | 独立 FriendService 或 GlobalServer 复用 | 接口化，关系链持久化 | MVP 可只占位 |
+| `globalcore/chat` | GameServer 同进程 LocalService | 独立 ChatService 或 GlobalServer 复用 | 接口化，不依赖本机连接对象，消息持久化 | 世界/公会发送和历史已实现 |
+| `globalcore/guild` | GameServer 同进程 LocalService | 独立 GuildService 或 GlobalServer 复用 | 接口化，公会数据以 DB 为权威，公会权限规则可复用 | 创建、搜索、申请、审批、退出、详情已实现 |
+| `globalcore/friend` | GameServer 同进程 LocalService | 独立 FriendService 或 GlobalServer 复用 | 接口化，关系链持久化 | 申请、同意、删除、列表已实现 |
 | `globalcore/notice` | GameServer 同进程 | 独立 NoticeService 或 GlobalServer 复用 | 接口化，公告配置/有效期持久化 | MVP 可只占位 |
 | `globalserver/rank` | 同进程 job 代码 | 独立 GlobalServer job | 无 GameServer 私有状态依赖，结算幂等 | 写代码边界 |
 | `globalserver/mail` | 同进程 job 代码 | 独立 GlobalServer job | 批量发放幂等，可失败重试 | 写代码边界 |
@@ -1081,13 +1081,16 @@ MVP 至少需要以下业务表：
 | `player_decoration` | workshop | 装饰拥有记录或实例，不进入通用背包 | A |
 | `asset_log` | asset | 资源变动流水 | A |
 | `economy_log` | economy | 经济场景流水，可与 asset_log 合并起步 | A |
+| `friend_relations` | globalcore/friend | 好友申请和已接受关系，同一玩家对只保存一行 | A |
+| `guilds` | globalcore/guild | 公会主体、名称和会长 | A |
+| `guild_members` | globalcore/guild | 公会成员和职位，UID 唯一保证一人一会 | A |
+| `guild_applications` | globalcore/guild | 待审批入会申请 | A |
+| `chat_messages` | globalcore/chat | 世界和公会频道历史消息 | B |
 
 后续占位表：
 
 | 表 | 模块 | MVP 状态 |
 |---|---|---|
-| `player_friend` | globalcore/friend | 只预留设计，不进入主链路 |
-| `guild` / `guild_member` | globalcore/guild | 只预留设计 |
 | `mail` / `mail_attachment` | globalcore/mail | 奖励补发后续实现 |
 | `rank_snapshot` | globalcore/rank | 无尽订单排行后续实现 |
 | `global_job_record` | globalserver | 全局 job 幂等、状态、重试记录 |
@@ -1256,7 +1259,8 @@ go_game_server/
 │   │   ├── asset_handler.go        # 资产/背包协议处理函数
 │   │   ├── card_handler.go         # 卡牌/卡组协议处理函数
 │   │   ├── level_handler.go        # 关卡协议处理函数
-│   │   └── workshop_handler.go     # 工坊协议处理函数
+│   │   ├── workshop_handler.go     # 工坊协议处理函数
+│   │   └── social_handler.go       # 好友、公会、聊天协议处理函数
 │   ├── contract/                   # 协议契约，不放框架实现，也不放玩法规则
 │   │   └── protocol/
 │   │       ├── opcode.go           # 全量 op_code 常量，禁止业务代码写裸数字
@@ -1316,15 +1320,18 @@ go_game_server/
 │   │   │   ├── deck.go
 │   │   │   ├── level.go
 │   │   │   ├── workshop.go
+│   │   │   ├── social.go
 │   │   │   ├── idempotency.go
 │   │   │   ├── economy_log.go
-│   │   │   └── guild.go
 │   │   ├── repository.go
 │   │   ├── player_repo.go
 │   │   ├── asset_repo.go
 │   │   ├── card_repo.go
 │   │   ├── order_repo.go
 │   │   ├── workshop_repo.go
+│   │   ├── friend_repo.go
+│   │   ├── guild_repo.go
+│   │   ├── chat_repo.go
 │   ├── gamedata/
 │   │   ├── loader.go
 │   │   ├── card_config.go
@@ -1359,7 +1366,8 @@ go_game_server/
 
 `globalcore` 当前落地规则：
 
-- MVP 只保留 `internal/globalcore/*_service.go` 和 `core.go`，承载 Friend/Chat/Guild/Mail/Rank/Notice 的接口与 DTO。
+- Friend/Chat/Guild 已在 `internal/globalcore/*_service.go` 中同时承载稳定接口、DTO、公共规则和 LocalService；启动时通过接口注入 Handler。
+- Mail/Rank/Notice 当前仍只保留接口与 DTO。
 - 不预创建 `friend/chat/guild/mail/rank/notice` 空目录；当某个公共领域真正实现 LocalService、RemoteClient 或可复用规则时，再按领域拆子目录。
 - 公告统一使用 `NoticeService`，不再保留旧 `WorldService` 命名。
 
@@ -1726,13 +1734,18 @@ type FriendService interface {
 }
 
 type GuildService interface {
+	Create(ctx context.Context, uid string, name string, reqID string) (GuildInfo, error)
+	Search(ctx context.Context, uid string, keyword string, cursor string, limit int) ([]GuildInfo, string, error)
+	Get(ctx context.Context, uid string, guildID string) (GuildInfo, error)
+	ListApplications(ctx context.Context, operatorUID string, guildID string, cursor string, limit int) ([]GuildApplication, string, error)
 	ApplyJoin(ctx context.Context, uid string, guildID string, reqID string) error
 	ApproveJoin(ctx context.Context, operatorUID string, guildID string, targetUID string, reqID string) error
+	Leave(ctx context.Context, uid string, reqID string) error
 }
 
 type ChatService interface {
-	SendChannelMsg(ctx context.Context, channelID string, uid string, content string, reqID string) error
-	PullHistory(ctx context.Context, channelID string, cursor string, limit int) ([]ChatMessage, string, error)
+	SendChannelMsg(ctx context.Context, channel string, uid string, content string, reqID string) (ChatMessage, error)
+	PullHistory(ctx context.Context, channel string, uid string, cursor string, limit int) ([]ChatMessage, string, error)
 }
 
 type RankService interface {
@@ -2116,6 +2129,19 @@ MVP 只使用协议 Envelope 中的业务心跳，不再额外维护一套 WebSo
 | 1401 | `workshop.get_overview` | M3 | 查询工坊总览 |
 | 1402 | `workshop.upgrade_facility` | M3 | 升级设施 |
 | 1403 | `workshop.claim_offline_reward` | M3 | 领取离线收益 |
+| 1601 | `friend.apply` | Social | 发送好友申请 |
+| 1602 | `friend.approve` | Social | 同意好友申请 |
+| 1603 | `friend.remove` | Social | 删除好友或申请 |
+| 1604 | `friend.list` | Social | 查询好友和申请 |
+| 1701 | `guild.create` | Social | 创建公会 |
+| 1702 | `guild.search` | Social | 搜索公会 |
+| 1703 | `guild.apply_join` | Social | 申请加入公会 |
+| 1704 | `guild.approve_join` | Social | 会长审批入会 |
+| 1705 | `guild.leave` | Social | 退出公会 |
+| 1706 | `guild.get` | Social | 查询公会详情 |
+| 1707 | `guild.list_applications` | Social | 会长查询待审批申请 |
+| 1801 | `chat.send` | Social | 发送世界或公会消息 |
+| 1802 | `chat.history` | Social | 拉取世界或公会历史 |
 | 1901 | `debug.reset_player` | Debug | 重置测试玩家 |
 
 协议原则：
@@ -2164,6 +2190,7 @@ gateway/ws.Server
 | `internal/handler/card_handler.go` | 卡牌协议处理函数，持有 `CardService` |
 | `internal/handler/level_handler.go` | 关卡协议处理函数，持有 `BattleService` |
 | `internal/handler/workshop_handler.go` | 工坊协议处理函数，持有 `WorkshopService` |
+| `internal/handler/social_handler.go` | 好友、公会和聊天协议处理函数，只依赖 `globalcore` 接口 |
 
 注册规则：
 

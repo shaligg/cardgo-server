@@ -10,6 +10,7 @@ import (
 	inventorysvc "github.com/bigfish/go_orm_1/internal/game/inventory"
 	playersvc "github.com/bigfish/go_orm_1/internal/game/player"
 	workshopsvc "github.com/bigfish/go_orm_1/internal/game/workshop"
+	"github.com/bigfish/go_orm_1/internal/globalcore"
 	"github.com/bigfish/go_orm_1/internal/platform/state"
 )
 
@@ -28,6 +29,9 @@ type BizHandler struct {
 	CardService      cardsvc.Service
 	BattleService    *battlesvc.Service
 	WorkshopService  workshopsvc.Service
+	FriendService    globalcore.FriendService
+	GuildService     globalcore.GuildService
+	ChatService      globalcore.ChatService
 	Searcher         WebSearcher
 	Online           *state.OnlineState
 }
@@ -55,6 +59,22 @@ func NewRegisteredRouter(h *BizHandler, enableDebugOps bool) *Router {
 
 	// 网页搜索等待外部 HTTP，不占用玩家分片锁。
 	router.RegisterWithMode(protocol.OpWebSearch, h.WebSearch, ExecutionHandlerManaged)
+
+	router.RegisterCached(protocol.OpFriendApply, h.FriendApply)
+	router.RegisterCached(protocol.OpFriendApprove, h.FriendApprove)
+	router.RegisterCached(protocol.OpFriendRemove, h.FriendRemove)
+	router.Register(protocol.OpFriendList, h.FriendList)
+
+	router.RegisterCached(protocol.OpGuildCreate, h.GuildCreate)
+	router.Register(protocol.OpGuildSearch, h.GuildSearch)
+	router.RegisterCached(protocol.OpGuildApplyJoin, h.GuildApplyJoin)
+	router.RegisterCached(protocol.OpGuildApproveJoin, h.GuildApproveJoin)
+	router.RegisterCached(protocol.OpGuildLeave, h.GuildLeave)
+	router.Register(protocol.OpGuildGet, h.GuildGet)
+	router.Register(protocol.OpGuildListApplications, h.GuildListApplications)
+
+	router.RegisterCached(protocol.OpChatSend, h.ChatSend)
+	router.Register(protocol.OpChatHistory, h.ChatHistory)
 
 	if enableDebugOps {
 		router.RegisterCached(protocol.OpPlayerAddGold, h.PlayerAddGold)

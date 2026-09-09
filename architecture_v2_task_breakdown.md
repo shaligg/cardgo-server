@@ -254,10 +254,11 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 13. DONE：删除没有任何发布或订阅调用方的进程内 EventBus；真实跨领域异步编排出现前只保留事件契约，不预建运行模块。
 14. DONE：删除没有实现和调用方的 `session.Store` 预留接口；当前会话由进程内 `Manager` 管理，跨节点只通过 Redis `PlayerOwnerStore` 保存归属。
 15. DONE：删除无人调用的 `SingleNodeAllocator`；单节点 Demo 与未来多节点统一使用 Redis `NodeRegistry` 驱动的 `RegistryNodeAllocator`。
-16. TODO：在独立压测机执行 P5 正式压测并回填容量结论。
-17. TODO：在预发环境执行 P6 灰度发布和故障注入演练，补充演练记录。
-18. 不新增无调用方的架构预留模块；按以上顺序一次修复一个现有问题。
-19. DEFERRED：监控确认重复 DB 读取成为瓶颈后，再按技术架构 7.6 节实现 `OnlinePlayerStore`；实施前必须先完成跨节点单写者 fencing，当前 Demo 不提前增加该调用链。
+16. DONE：完成轻社交基础闭环：好友申请、公会成员生命周期、世界/公会聊天历史均接入 `globalcore -> repo -> MySQL`，并保留 LocalService/RemoteClient 替换边界。
+17. TODO：在独立压测机执行 P5 正式压测并回填容量结论。
+18. TODO：在预发环境执行 P6 灰度发布和故障注入演练，补充演练记录。
+19. 不新增无调用方的架构预留模块；按以上顺序一次修复一个现有问题。
+20. DEFERRED：监控确认重复 DB 读取成为瓶颈后，再按技术架构 7.6 节实现 `OnlinePlayerStore`；实施前必须先完成跨节点单写者 fencing，当前 Demo 不提前增加该调用链。
 
 ## 8. 卡牌 MVP 后续任务拆分
 
@@ -377,7 +378,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 13. DONE：拆出 `internal/app/gameserver/admin_http.go`，收敛 health、metrics、drain、sessions 和 login API 路由组装。
 14. DONE：删除 `internal/game/chat`、`internal/game/guild`、`internal/game/rank` 空壳，避免公共领域能力和本地玩法目录边界混淆；后续聊天、公会、排行入口以 `globalcore/*` 为准。
 15. DONE：新增 `internal/globalserver` 最小契约包，先落地排行榜结算、批量邮件和通用 Job 接口；MVP 同进程直调，未来独立公共服时在接口外层增加 transport adapter。
-16. DONE：补齐 `internal/globalcore` 的 Friend/Mail/Notice 接口契约，与技术文档中的公共领域核心清单对齐；只定义 DTO 和接口，不实现完整业务。
+16. DONE：补齐 `internal/globalcore` 的 Friend/Mail/Notice 初始接口契约；Friend 后续已在“当前后续任务”第 16 项升级为完整基础闭环。
 17. DONE：删除旧 `WorldService` 公告口径，公告统一收敛到 `NoticeService`，避免公共领域核心出现两套命名。
 
 目标：
