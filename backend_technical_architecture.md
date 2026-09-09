@@ -2502,7 +2502,7 @@ sequenceDiagram
     LS->>REPO: update level progress
     LS->>DB: commit
     DB-->>LS: ok
-    LS->>BS: CloseSession
+    LS->>BS: MarkSettled(result)
     LS-->>GW: LevelSettleResult
     GW-->>C: biz_ack(rewards, assets, progress)
 ```
