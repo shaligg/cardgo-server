@@ -168,6 +168,12 @@ func TestSecondLevelClearUsesRepeatRewards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start repeated level: %v", err)
 	}
+	if len(svc.sessions) != 1 || svc.sessions["u1"].state.SessionID != second.SessionID {
+		t.Fatalf("new level did not replace settled runtime: %+v", svc.sessions)
+	}
+	if _, err := svc.PlayCard(context.Background(), "u1", first.SessionID, 10001, "stale-play"); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("old session play error = %v, want ErrSessionNotFound", err)
+	}
 	if _, err := svc.PlayCard(context.Background(), "u1", second.SessionID, 10001, "play-2"); err != nil {
 		t.Fatalf("play repeated level: %v", err)
 	}
@@ -195,6 +201,21 @@ func TestStartLevelRequiresReqID(t *testing.T) {
 	}
 }
 
+func TestStartLevelRejectsSecondActiveSession(t *testing.T) {
+	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
+	first, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("start first level: %v", err)
+	}
+
+	if _, err := svc.StartLevel(context.Background(), "u1", 1, "start-2"); !errors.Is(err, ErrBattleInProgress) {
+		t.Fatalf("second StartLevel error = %v, want ErrBattleInProgress", err)
+	}
+	if len(svc.sessions) != 1 || svc.sessions["u1"].state.SessionID != first.SessionID {
+		t.Fatalf("active runtime was replaced: %+v", svc.sessions)
+	}
+}
+
 func TestPlayCardRequiresReqID(t *testing.T) {
 	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
 	session, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
@@ -216,7 +237,7 @@ func TestPlayCardFailureDoesNotReserveReqID(t *testing.T) {
 	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10002, "play-1"); !errors.Is(err, ErrInsufficientResource) {
 		t.Fatalf("failed PlayCard error = %v, want ErrInsufficientResource", err)
 	}
-	if current := svc.sessions[session.SessionID].state.Resources["bread"]; current != 0 {
+	if current := svc.sessions["u1"].state.Resources["bread"]; current != 0 {
 		t.Fatalf("failed PlayCard left partial state, bread = %d", current)
 	}
 
@@ -252,7 +273,7 @@ func TestSettleLevelKeepsSessionUnsettledWhenRewardTransactionFails(t *testing.T
 	if _, err := svc.SettleLevel(context.Background(), "u1", session.SessionID, "settle-1"); err == nil {
 		t.Fatal("expected reward transaction error")
 	}
-	if rs := svc.sessions[session.SessionID]; rs.state.Settled || rs.settleResult != nil {
+	if rs := svc.sessions["u1"]; rs.state.Settled || rs.settleResult != nil {
 		t.Fatalf("failed transaction marked session settled: %+v", rs.state)
 	}
 

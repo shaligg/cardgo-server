@@ -34,6 +34,8 @@ var (
 	ErrInsufficientResource = errors.New("insufficient battle resource")
 	// ErrLevelNotComplete 表示关卡目标尚未完成，不能结算。
 	ErrLevelNotComplete = errors.New("level goal not complete")
+	// ErrBattleInProgress 表示玩家已有一局尚未结算的关卡。
+	ErrBattleInProgress = errors.New("battle already in progress")
 )
 
 // OrderState 是局内展示的订单状态。
@@ -92,7 +94,6 @@ type Service struct {
 
 type runtimeSession struct {
 	mu             sync.Mutex
-	uid            string
 	deleted        bool
 	state          LevelSession
 	level          gamedata.LevelConfig
@@ -117,7 +118,6 @@ func (s *Service) StartLevel(ctx context.Context, uid string, levelID int64, req
 	}
 
 	rs := &runtimeSession{
-		uid:            uid,
 		level:          level,
 		nextOrderIndex: 0,
 		state: LevelSession{
@@ -136,10 +136,9 @@ func (s *Service) StartLevel(ctx context.Context, uid string, levelID int64, req
 		rs.state.ActiveOrders = append(rs.state.ActiveOrders, s.nextOrder(rs))
 	}
 
-	s.mu.Lock()
-	s.initLocked()
-	s.sessions[rs.state.SessionID] = rs
-	s.mu.Unlock()
+	if err := s.storeSession(uid, rs); err != nil {
+		return LevelSession{}, err
+	}
 	return cloneSession(rs.state), nil
 }
 
@@ -255,16 +254,58 @@ func (s *Service) initLocked() {
 	}
 }
 
+// storeSession 保存玩家的新关卡。未结算的旧关卡不能被覆盖，已结算关卡由新关卡替换。
+func (s *Service) storeSession(uid string, next *runtimeSession) error {
+	for {
+		s.mu.RLock()
+		current := s.sessions[uid]
+		s.mu.RUnlock()
+		if current == nil {
+			s.mu.Lock()
+			s.initLocked()
+			if s.sessions[uid] == nil {
+				s.sessions[uid] = next
+				s.mu.Unlock()
+				return nil
+			}
+			s.mu.Unlock()
+			continue
+		}
+
+		current.mu.Lock()
+		if current.deleted {
+			current.mu.Unlock()
+			continue
+		}
+		if !current.state.Settled {
+			current.mu.Unlock()
+			return ErrBattleInProgress
+		}
+
+		s.mu.Lock()
+		if s.sessions[uid] != current {
+			s.mu.Unlock()
+			current.mu.Unlock()
+			continue
+		}
+		current.deleted = true
+		s.sessions[uid] = next
+		s.mu.Unlock()
+		current.mu.Unlock()
+		return nil
+	}
+}
+
 // lockSession 获取并锁定单个关卡会话；调用方必须在返回成功后解锁 rs.mu。
 func (s *Service) lockSession(uid string, sessionID string) (*runtimeSession, error) {
 	s.mu.RLock()
-	rs := s.sessions[sessionID]
+	rs := s.sessions[uid]
 	s.mu.RUnlock()
-	if rs == nil || rs.uid != uid {
+	if rs == nil {
 		return nil, ErrSessionNotFound
 	}
 	rs.mu.Lock()
-	if rs.deleted {
+	if rs.deleted || rs.state.SessionID != sessionID {
 		rs.mu.Unlock()
 		return nil, ErrSessionNotFound
 	}
@@ -275,46 +316,35 @@ func (s *Service) lockSession(uid string, sessionID string) (*runtimeSession, er
 func (s *Service) PlayerUIDs() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	seen := make(map[string]struct{}, len(s.sessions))
 	out := make([]string, 0, len(s.sessions))
-	for _, runtime := range s.sessions {
-		uid := runtime.uid
+	for uid := range s.sessions {
 		if uid == "" {
 			continue
 		}
-		if _, ok := seen[uid]; ok {
-			continue
-		}
-		seen[uid] = struct{}{}
 		out = append(out, uid)
 	}
 	return out
 }
 
-// DeletePlayerRuntime 删除指定玩家在当前节点的全部关卡运行时。
+// DeletePlayerRuntime 删除指定玩家在当前节点的关卡运行时。
 func (s *Service) DeletePlayerRuntime(uid string) int {
 	s.mu.RLock()
-	targets := make(map[string]*runtimeSession)
-	for sessionID, runtime := range s.sessions {
-		if runtime.uid == uid {
-			targets[sessionID] = runtime
-		}
-	}
+	runtime := s.sessions[uid]
 	s.mu.RUnlock()
-
-	deleted := 0
-	for sessionID, runtime := range targets {
-		runtime.mu.Lock()
-		runtime.deleted = true
-		s.mu.Lock()
-		if s.sessions[sessionID] == runtime {
-			delete(s.sessions, sessionID)
-			deleted++
-		}
-		s.mu.Unlock()
-		runtime.mu.Unlock()
+	if runtime == nil {
+		return 0
 	}
-	return deleted
+
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessions[uid] != runtime {
+		return 0
+	}
+	runtime.deleted = true
+	delete(s.sessions, uid)
+	return 1
 }
 
 func (s *Service) nextOrder(rs *runtimeSession) OrderState {

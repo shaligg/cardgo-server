@@ -63,7 +63,8 @@ func isAlreadyMaxError(err error) bool {
 }
 
 func isPreconditionFailedError(err error) bool {
-	return errors.Is(err, battlesvc.ErrLevelNotComplete)
+	return errors.Is(err, battlesvc.ErrLevelNotComplete) ||
+		errors.Is(err, battlesvc.ErrBattleInProgress)
 }
 
 // syncOnlinePlayerState 把最新玩家快照写入在线热状态。

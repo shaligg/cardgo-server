@@ -825,7 +825,16 @@ Dispatcher 按 uid 串行
 7. 队列策略：每连接一个有界 FIFO 队列，队列满即关闭该慢客户端
 8. 资源隔离：`login` 与 `realtime` 使用独立 worker 池与限流器，避免互相挤压。
 
-### 8.1 事件可靠性机制（同进程先行，后续可迁移 MQ）
+### 8.1 BattleSession 索引与生命周期
+1. `BattleService` 是应用级共享实例，公共依赖只初始化一次；玩家之间不共享具体局内状态。
+2. 当前短关卡规则限定一个 UID 同时最多存在一局，运行态索引固定为 `map[uid]*runtimeSession`。
+3. `session_id` 保存在 `runtimeSession` 内，用于确认出牌和结算请求仍属于当前这一局；它不是内存索引 key，也不替代网络重试使用的 `req_id`。
+4. 玩家已有未结算关卡时，再次开始关卡返回前置条件错误；相同 `req_id` 的网络重试由 Dispatcher 直接返回首次结果。
+5. 玩家结算成功后暂时保留该局结果；开始下一局时以新运行态替换，旧 `session_id` 随即失效，保证每个 UID 最多占用一条记录。
+6. 玩家迁移、离线过期或归属失效时，按 UID 直接删除运行态。
+7. `BattleService.mu` 的 `RWMutex` 只保护 `uid -> runtimeSession` 索引；`runtimeSession.mu` 只保护单个玩家的局内状态，任何数据库事务或外部调用都不得持有索引锁。
+
+### 8.2 事件可靠性机制（同进程先行，后续可迁移 MQ）
 1. 事件字段统一：`event_id`、`event_type`、`occur_at`、`trace_id`、`version`
 2. 发布顺序：业务事务提交成功后再发布事件，避免事务回滚后脏事件
 3. 消费幂等：按 `event_id` 去重，重复投递必须可重放
@@ -2507,6 +2516,7 @@ sequenceDiagram
 5. 出牌效果先作用于状态副本，全部成功后才替换正式状态；失败结果不进入近期结果缓存。
 6. `BattleService` 自身仍以 `settleResult` 保证同一局内会话只结算一次，这是局内状态约束，不是通用网络重试缓存。
 7. 如果结算已成功，客户端在近期窗口内重复请求由 Dispatcher 直接返回首次结果，不得再次发奖。
+8. BattleSession 的 UID 索引、单局限制和替换规则统一遵循 8.1 节，不在本流程重复定义。
 
 ### 20.6 MVP 工坊升级链路
 ```mermaid
