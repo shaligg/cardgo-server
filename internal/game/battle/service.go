@@ -443,9 +443,3 @@ func cloneSession(in LevelSession) LevelSession {
 	out.ActiveOrders = append([]OrderState(nil), in.ActiveOrders...)
 	return out
 }
-
-func clonePlayCardResult(in PlayCardResult) PlayCardResult {
-	out := in
-	out.Session = cloneSession(in.Session)
-	return out
-}
