@@ -123,8 +123,6 @@ Client
                                                 +--> [State: OnlineState memory]
                                                 |
                                                 +--> [Repository] --> [DB]
-                                                                                      |
-                                                                                      +--> [EventBus(in-proc)]
 ```
 
 ### 4.2 文字简图（主链路：登录 + 实时）
@@ -834,7 +832,9 @@ Dispatcher 按 uid 串行
 6. 玩家迁移、离线过期或归属失效时，按 UID 直接删除运行态。
 7. `BattleService.mu` 的 `RWMutex` 只保护 `uid -> runtimeSession` 索引；`runtimeSession.mu` 只保护单个玩家的局内状态，任何数据库事务或外部调用都不得持有索引锁。
 
-### 8.2 事件可靠性机制（同进程先行，后续可迁移 MQ）
+### 8.2 未来事件可靠性机制（DEFERRED）
+当前 Demo 没有需要异步跨领域编排的运行链路，因此不创建空 EventBus。出现真实调用方后再按以下契约实现：
+
 1. 事件字段统一：`event_id`、`event_type`、`occur_at`、`trace_id`、`version`
 2. 发布顺序：业务事务提交成功后再发布事件，避免事务回滚后脏事件
 3. 消费幂等：按 `event_id` 去重，重复投递必须可重放
@@ -1289,9 +1289,6 @@ go_game_server/
 │   │   ├── state/
 │   │   │   ├── online_state.go
 │   │   │   └── maintainer.go
-│   │   └── eventbus/
-│   │       ├── bus.go
-│   │       └── handlers.go
 │   ├── game/
 │   │   ├── player/
 │   │   ├── asset/

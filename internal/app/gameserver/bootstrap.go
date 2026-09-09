@@ -25,7 +25,6 @@ import (
 	iredis "github.com/bigfish/go_orm_1/internal/infra/redis"
 	"github.com/bigfish/go_orm_1/internal/infra/websearch"
 	"github.com/bigfish/go_orm_1/internal/platform/auth"
-	"github.com/bigfish/go_orm_1/internal/platform/eventbus"
 	"github.com/bigfish/go_orm_1/internal/platform/login"
 	"github.com/bigfish/go_orm_1/internal/platform/session"
 	"github.com/bigfish/go_orm_1/internal/platform/state"
@@ -35,7 +34,6 @@ import (
 // Application 持有 GameServer 的运行组件和基础设施资源，并统一管理其生命周期。
 type Application struct {
 	cfg                   Config
-	bus                   eventbus.Bus
 	loginSvc              login.Provider
 	apiServer             *http.Server
 	wsServer              *ws.Server
@@ -252,7 +250,6 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 
 	app := &Application{
 		cfg:             cfg,
-		bus:             eventbus.NewInProcBus(),
 		loginSvc:        loginService,
 		apiServer:       apiServer,
 		wsServer:        wsServer,
