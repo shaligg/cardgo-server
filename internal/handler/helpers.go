@@ -63,8 +63,8 @@ func isNotFoundError(err error) bool {
 }
 
 func isInsufficientResourceError(err error) bool {
-	return errors.Is(err, repo.ErrInsufficientGold) ||
-		errors.Is(err, repo.ErrInsufficientItem) ||
+	return errors.Is(err, assetsvc.ErrInsufficientGold) ||
+		errors.Is(err, assetsvc.ErrInsufficientItem) ||
 		errors.Is(err, battlesvc.ErrInsufficientResource)
 }
 

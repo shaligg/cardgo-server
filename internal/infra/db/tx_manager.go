@@ -7,6 +7,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// TransactionRunner 是业务服务依赖的最小事务执行接口。
+//
+// 业务服务只关心一组操作是否在同一事务中完成，不需要感知连接池等数据库细节。
+type TransactionRunner interface {
+	Do(ctx context.Context, fn func(tx *gorm.DB) error) error
+}
+
 // TxManager 统一管理一次数据库事务的开启、提交和回滚。
 //
 // 它只负责事务生命周期，不包含任何玩法逻辑；业务层在 fn 内用同一个 tx 编排多个 repo/writer。

@@ -591,6 +591,7 @@ GameServer Handler
 - 数据库具体实现统一使用 `DB<Domain>Repository` 命名，例如 `DBPlayerRepository`、`DBAssetRepository`、`DBCardRepository`；禁止让一个 Repository 实现无关业务域的全部方法。
 - 当前实现按聚合拆为玩家资料、资产、卡牌/卡组、关卡进度、工坊、好友、公会和聊天仓储；共享同一个 GORM 连接池不代表共享同一个 Repository 类型。
 - `DBAssetRepository` 可以同时访问玩家表中的基础货币、背包表和资产流水表，因为它们共同属于一次资产变更事务；`DBPlayerRepository` 只负责玩家基础资料，不再承载其他领域方法。
+- 资产数量合法性、当前余额计算和余额不足判断由 `domain/asset.Service` 负责；`DBAssetRepository` 只在 Service 建立的事务中读取当前资产、保存计算后的余额并写资产流水。
 - 公会创建、申请、审批、退出、会长转让和解散规则由 `globalcore.LocalGuildService` 判断并通过 `TxManager` 统一事务；`DBGuildRepository` 只提供事务内锁行、查询和 CRUD。未来拆为远程公会服时，GameServer 只把 `GuildService` 的本地实现替换为 `RemoteGuildClient`，远端继续复用同一套公会规则。
 - 好友申请、申请方向、重复关系和状态流转由 `globalcore.LocalFriendService` 判断；`DBFriendRepository` 只提供关系查询、锁行和 CRUD，审批事务由 Service 通过 `TxManager` 管理。
 - 数据库表迁移由包级 `repo.Migrate` 负责，不挂在任何业务 Repository 上，避免启动职责依附于某个领域仓储。
@@ -1708,7 +1709,10 @@ type Manager interface {
 ```go
 package repo
 
-import "context"
+import (
+	"context"
+	"gorm.io/gorm"
+)
 
 type Player struct {
 	UID      string
@@ -1724,7 +1728,8 @@ type PlayerRepository interface {
 }
 
 type PlayerAssetRepository interface {
-	ChangeGold(ctx context.Context, uid string, delta int64, itemID int64, reason string, reqID string) (Player, error)
+	GetPlayerAssetInTx(ctx context.Context, tx *gorm.DB, uid string) (Player, error)
+	SaveGoldInTx(ctx context.Context, tx *gorm.DB, uid string, balance int64, itemID int64, delta int64, reason string, reqID string) error
 }
 ```
 
@@ -2429,6 +2434,7 @@ sequenceDiagram
     participant DB as DB
     participant MT as Metrics
     participant AS as AssetService
+	participant TX as TxManager
 
     C->>GW: biz_req(envelope.op_code=1002, payload={uid?,delta,req_id})
     GW->>GW: decode + basic validate + inbound rate limit
@@ -2441,10 +2447,16 @@ sequenceDiagram
     BR->>H: handlers[op_code]
     H->>SVC: AddGold(uid, delta, req_id)
     SVC->>AS: Grant(uid, RewardItem{item_id=1,count=delta}, reason, req_id)
-    AS->>REPO: ChangeGold(uid, delta, item_id, reason, req_id)
-    REPO->>DB: tx(player.gold + asset_log(req_id))
-    DB-->>REPO: committed + latest player
-    REPO-->>SVC: player
+	AS->>TX: Do(ctx)
+	TX->>DB: BEGIN
+	AS->>REPO: GetPlayerAssetInTx(tx, uid)
+	REPO->>DB: SELECT player
+	DB-->>AS: current player
+	AS->>AS: calculate balance and validate
+	AS->>REPO: SaveGoldInTx(tx, balance, delta, reason, req_id)
+	REPO->>DB: UPDATE player.gold + INSERT asset_log
+	TX->>DB: COMMIT
+	AS-->>SVC: player with latest balance
     SVC-->>H: biz result
     H-->>BR: biz result
     BR-->>DIS: biz result

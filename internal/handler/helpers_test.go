@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	assetsvc "github.com/bigfish/go_orm_1/internal/domain/asset"
 	terrors "github.com/bigfish/go_orm_1/internal/framework/transport/errors"
 	battlesvc "github.com/bigfish/go_orm_1/internal/gameplay/battle"
 	cardsvc "github.com/bigfish/go_orm_1/internal/gameplay/card"
@@ -18,7 +19,7 @@ func TestToBizErrorMapsExpectedClientCodes(t *testing.T) {
 	}{
 		{name: "bad request", err: repo.ErrInvalidReqID, code: terrors.CodeBadRequest},
 		{name: "not found", err: repo.ErrCardNotOwned, code: terrors.CodeNotFound},
-		{name: "insufficient", err: repo.ErrInsufficientGold, code: terrors.CodeInsufficient},
+		{name: "insufficient", err: assetsvc.ErrInsufficientGold, code: terrors.CodeInsufficient},
 		{name: "already max", err: repo.ErrCardMaxLevel, code: terrors.CodeAlreadyMax},
 		{name: "precondition", err: battlesvc.ErrLevelNotComplete, code: terrors.CodePreconditionFailed},
 		{name: "battle in progress", err: battlesvc.ErrBattleInProgress, code: terrors.CodePreconditionFailed},

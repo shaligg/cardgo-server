@@ -9,6 +9,7 @@ import (
 	playergame "github.com/bigfish/go_orm_1/internal/domain/player"
 	terrors "github.com/bigfish/go_orm_1/internal/framework/transport/errors"
 	"github.com/bigfish/go_orm_1/internal/gamedata"
+	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/repo"
 	"github.com/bigfish/go_orm_1/internal/repo/model"
 	"github.com/bigfish/go_orm_1/internal/testutil/testdb"
@@ -45,6 +46,7 @@ func TestPlayerHandlerIgnoresPayloadUIDForWrite(t *testing.T) {
 			Items:         items,
 			PlayerRepo:    dbRepo.DBAssetRepository,
 			InventoryRepo: dbRepo.DBAssetRepository,
+			Tx:            idb.NewTxManager(db),
 		},
 	}
 	handler := &BizHandler{PlayerService: playerService}

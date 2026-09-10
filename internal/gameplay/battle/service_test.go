@@ -26,32 +26,27 @@ type blockingPlayerRepo struct {
 	release chan struct{}
 }
 
-func (r *blockingPlayerRepo) ChangeGoldInTx(ctx context.Context, tx *gorm.DB, uid string, delta int64, itemID int64, reason string, reqID string) (repo.Player, error) {
+func (r *blockingPlayerRepo) SaveGoldInTx(ctx context.Context, tx *gorm.DB, uid string, balance int64, itemID int64, delta int64, reason string, reqID string) error {
 	close(r.entered)
 	<-r.release
-	return r.fakePlayerRepo.ChangeGoldInTx(ctx, tx, uid, delta, itemID, reason, reqID)
+	return r.fakePlayerRepo.SaveGoldInTx(ctx, tx, uid, balance, itemID, delta, reason, reqID)
 }
 
-func (r *fakePlayerRepo) ChangeGold(ctx context.Context, uid string, delta int64, itemID int64, reason string, reqID string) (repo.Player, error) {
-	_ = ctx
-	_ = itemID
-	_ = reason
-	_ = reqID
+func (r *fakePlayerRepo) GetPlayerAssetInTx(_ context.Context, _ *gorm.DB, uid string) (repo.Player, error) {
 	if r.player.UID == "" {
 		r.player = repo.Player{UID: uid, Level: 1}
 	}
-	r.player.Gold += delta
-	r.grantCalls++
 	return r.player, nil
 }
 
-func (r *fakePlayerRepo) ChangeGoldInTx(ctx context.Context, tx *gorm.DB, uid string, delta int64, itemID int64, reason string, reqID string) (repo.Player, error) {
-	_ = tx
+func (r *fakePlayerRepo) SaveGoldInTx(_ context.Context, _ *gorm.DB, _ string, balance int64, _ int64, _ int64, _ string, _ string) error {
 	if r.failNextGrant {
 		r.failNextGrant = false
-		return repo.Player{}, errors.New("forced grant failure")
+		return errors.New("forced grant failure")
 	}
-	return r.ChangeGold(ctx, uid, delta, itemID, reason, reqID)
+	r.player.Gold = balance
+	r.grantCalls++
+	return nil
 }
 
 type fakeInventoryRepo struct {
@@ -59,10 +54,7 @@ type fakeInventoryRepo struct {
 	grantCalls int
 }
 
-func (r *fakeInventoryRepo) ChangeInventoryItem(ctx context.Context, uid string, itemID int64, delta int64, reason string, reqID string) (repo.InventoryItem, error) {
-	_ = ctx
-	_ = reason
-	_ = reqID
+func (r *fakeInventoryRepo) GetOrCreateInventoryItemInTx(_ context.Context, _ *gorm.DB, uid string, itemID int64) (repo.InventoryItem, error) {
 	if r.items == nil {
 		r.items = map[int64]repo.InventoryItem{}
 	}
@@ -70,15 +62,13 @@ func (r *fakeInventoryRepo) ChangeInventoryItem(ctx context.Context, uid string,
 	if item.UID == "" {
 		item = repo.InventoryItem{UID: uid, ItemID: itemID}
 	}
-	item.Count += delta
-	r.items[itemID] = item
-	r.grantCalls++
 	return item, nil
 }
 
-func (r *fakeInventoryRepo) ChangeInventoryItemInTx(ctx context.Context, tx *gorm.DB, uid string, itemID int64, delta int64, reason string, reqID string) (repo.InventoryItem, error) {
-	_ = tx
-	return r.ChangeInventoryItem(ctx, uid, itemID, delta, reason, reqID)
+func (r *fakeInventoryRepo) SaveInventoryItemInTx(_ context.Context, _ *gorm.DB, item repo.InventoryItem, _ int64, _ string, _ string) error {
+	r.items[item.ItemID] = item
+	r.grantCalls++
+	return nil
 }
 
 func TestLevelFlowSettleGrantsRewardsOnce(t *testing.T) {

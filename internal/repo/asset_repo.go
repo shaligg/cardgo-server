@@ -21,46 +21,31 @@ func NewDBAssetRepository(db *gorm.DB) *DBAssetRepository {
 	return &DBAssetRepository{db: db}
 }
 
-// ChangeGold 在事务中变更玩家金币并记录资产流水。
-func (r *DBAssetRepository) ChangeGold(ctx context.Context, uid string, delta int64, itemID int64, reason string, reqID string) (Player, error) {
-	var out Player
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		out, err = r.ChangeGoldInTx(ctx, tx, uid, delta, itemID, reason, reqID)
-		return err
-	})
-	if err != nil {
-		return Player{}, err
-	}
-	return out, nil
-}
-
-// ChangeGoldInTx 在外部事务中变更玩家金币。
-func (r *DBAssetRepository) ChangeGoldInTx(ctx context.Context, tx *gorm.DB, uid string, delta int64, itemID int64, reason string, reqID string) (Player, error) {
-	if reqID == "" {
-		return Player{}, ErrInvalidReqID
-	}
+// GetPlayerAssetInTx 在指定事务中读取玩家字段类资产。
+func (r *DBAssetRepository) GetPlayerAssetInTx(ctx context.Context, tx *gorm.DB, uid string) (Player, error) {
 	if tx == nil {
 		return Player{}, fmt.Errorf("transaction is nil")
-	}
-	if reason == "" {
-		reason = "asset.change_gold"
 	}
 	current, err := getPlayer(ctx, tx, uid)
 	if err != nil {
 		return Player{}, err
 	}
-	if current.Gold+delta < 0 {
-		return Player{}, ErrInsufficientGold
-	}
-	current.Gold += delta
-	if err := tx.WithContext(ctx).Save(&current).Error; err != nil {
-		return Player{}, fmt.Errorf("save player: %w", err)
-	}
-	if err := insertAssetLog(tx.WithContext(ctx), uid, itemID, delta, current.Gold, reason, reqID); err != nil {
-		return Player{}, err
-	}
 	return toDomainPlayer(current), nil
+}
+
+// SaveGoldInTx 保存业务层已经计算完成的金币余额，并写入同一事务的资产流水。
+func (r *DBAssetRepository) SaveGoldInTx(ctx context.Context, tx *gorm.DB, uid string, balance int64, itemID int64, delta int64, reason string, reqID string) error {
+	if tx == nil {
+		return fmt.Errorf("transaction is nil")
+	}
+	result := tx.WithContext(ctx).Model(&model.Player{}).Where("uid = ?", uid).Update("gold", balance)
+	if result.Error != nil {
+		return fmt.Errorf("update player gold: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrPlayerNotFound
+	}
+	return insertAssetLog(tx.WithContext(ctx), uid, itemID, delta, balance, reason, reqID)
 }
 
 // GetInventory 查询玩家通用可堆叠背包。
@@ -76,46 +61,33 @@ func (r *DBAssetRepository) GetInventory(ctx context.Context, uid string) ([]Inv
 	return out, nil
 }
 
-// ChangeInventoryItem 在事务中变更通用可堆叠背包道具并记录资产流水。
-func (r *DBAssetRepository) ChangeInventoryItem(ctx context.Context, uid string, itemID int64, delta int64, reason string, reqID string) (InventoryItem, error) {
-	var out InventoryItem
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		out, err = r.ChangeInventoryItemInTx(ctx, tx, uid, itemID, delta, reason, reqID)
-		return err
-	})
-	if err != nil {
-		return InventoryItem{}, err
-	}
-	return out, nil
-}
-
-// ChangeInventoryItemInTx 在外部事务中变更通用可堆叠背包道具。
-func (r *DBAssetRepository) ChangeInventoryItemInTx(ctx context.Context, tx *gorm.DB, uid string, itemID int64, delta int64, reason string, reqID string) (InventoryItem, error) {
-	if reqID == "" {
-		return InventoryItem{}, ErrInvalidReqID
-	}
+// GetOrCreateInventoryItemInTx 在指定事务中读取背包项，不存在时创建零值记录。
+func (r *DBAssetRepository) GetOrCreateInventoryItemInTx(ctx context.Context, tx *gorm.DB, uid string, itemID int64) (InventoryItem, error) {
 	if tx == nil {
 		return InventoryItem{}, fmt.Errorf("transaction is nil")
-	}
-	if reason == "" {
-		reason = "asset.change_item"
 	}
 	current, err := getOrCreateInventoryItem(ctx, tx, uid, itemID)
 	if err != nil {
 		return InventoryItem{}, err
 	}
-	if current.Count+delta < 0 {
-		return InventoryItem{}, ErrInsufficientItem
-	}
-	current.Count += delta
-	if err := tx.WithContext(ctx).Save(&current).Error; err != nil {
-		return InventoryItem{}, fmt.Errorf("save inventory item: %w", err)
-	}
-	if err := insertAssetLog(tx.WithContext(ctx), uid, itemID, delta, current.Count, reason, reqID); err != nil {
-		return InventoryItem{}, err
-	}
 	return toDomainInventoryItem(current), nil
+}
+
+// SaveInventoryItemInTx 保存业务层已经计算完成的背包数量，并写入同一事务的资产流水。
+func (r *DBAssetRepository) SaveInventoryItemInTx(ctx context.Context, tx *gorm.DB, item InventoryItem, delta int64, reason string, reqID string) error {
+	if tx == nil {
+		return fmt.Errorf("transaction is nil")
+	}
+	result := tx.WithContext(ctx).Model(&model.InventoryItem{}).
+		Where("uid = ? AND item_id = ?", item.UID, item.ItemID).
+		Update("count", item.Count)
+	if result.Error != nil {
+		return fmt.Errorf("update inventory item: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("inventory item not found")
+	}
+	return insertAssetLog(tx.WithContext(ctx), item.UID, item.ItemID, delta, item.Count, reason, reqID)
 }
 
 func getOrCreateInventoryItem(ctx context.Context, tx *gorm.DB, uid string, itemID int64) (model.InventoryItem, error) {

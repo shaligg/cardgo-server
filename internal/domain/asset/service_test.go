@@ -19,29 +19,26 @@ type fakePlayerRepo struct {
 	lastItemID int64
 }
 
-func (r *fakePlayerRepo) ChangeGold(ctx context.Context, uid string, delta int64, itemID int64, reason string, reqID string) (repo.Player, error) {
+func (r *fakePlayerRepo) GetPlayerAssetInTx(_ context.Context, _ *gorm.DB, uid string) (repo.Player, error) {
 	if r.player.UID == "" {
 		r.player = repo.Player{UID: uid, Level: 1}
 	}
-	if r.player.Gold+delta < 0 {
-		return repo.Player{}, repo.ErrInsufficientGold
-	}
-	r.player.Gold += delta
-	r.lastReq = reqID
-	r.lastReason = reason
-	r.lastItemID = itemID
 	return r.player, nil
 }
 
-func (r *fakePlayerRepo) ChangeGoldInTx(ctx context.Context, _ *gorm.DB, uid string, delta int64, itemID int64, reason string, reqID string) (repo.Player, error) {
-	return r.ChangeGold(ctx, uid, delta, itemID, reason, reqID)
+func (r *fakePlayerRepo) SaveGoldInTx(_ context.Context, _ *gorm.DB, _ string, balance int64, itemID int64, _ int64, reason string, reqID string) error {
+	r.player.Gold = balance
+	r.lastReq = reqID
+	r.lastReason = reason
+	r.lastItemID = itemID
+	return nil
 }
 
 type fakeInventoryRepo struct {
 	items map[int64]repo.InventoryItem
 }
 
-func (r *fakeInventoryRepo) ChangeInventoryItem(ctx context.Context, uid string, itemID int64, delta int64, reason string, reqID string) (repo.InventoryItem, error) {
+func (r *fakeInventoryRepo) GetOrCreateInventoryItemInTx(_ context.Context, _ *gorm.DB, uid string, itemID int64) (repo.InventoryItem, error) {
 	if r.items == nil {
 		r.items = map[int64]repo.InventoryItem{}
 	}
@@ -49,16 +46,18 @@ func (r *fakeInventoryRepo) ChangeInventoryItem(ctx context.Context, uid string,
 	if current.UID == "" {
 		current = repo.InventoryItem{UID: uid, ItemID: itemID}
 	}
-	if current.Count+delta < 0 {
-		return repo.InventoryItem{}, repo.ErrInsufficientItem
-	}
-	current.Count += delta
-	r.items[itemID] = current
 	return current, nil
 }
 
-func (r *fakeInventoryRepo) ChangeInventoryItemInTx(ctx context.Context, _ *gorm.DB, uid string, itemID int64, delta int64, reason string, reqID string) (repo.InventoryItem, error) {
-	return r.ChangeInventoryItem(ctx, uid, itemID, delta, reason, reqID)
+func (r *fakeInventoryRepo) SaveInventoryItemInTx(_ context.Context, _ *gorm.DB, item repo.InventoryItem, _ int64, _ string, _ string) error {
+	r.items[item.ItemID] = item
+	return nil
+}
+
+type fakeTransactionRunner struct{}
+
+func (fakeTransactionRunner) Do(_ context.Context, fn func(tx *gorm.DB) error) error {
+	return fn(&gorm.DB{})
 }
 
 func newTestService(t *testing.T, players repo.PlayerAssetRepository, inventory repo.InventoryAssetRepository) Service {
@@ -70,7 +69,7 @@ func newTestService(t *testing.T, players repo.PlayerAssetRepository, inventory 
 	if err != nil {
 		t.Fatalf("NewCatalog returned error: %v", err)
 	}
-	return Service{Items: catalog, PlayerRepo: players, InventoryRepo: inventory}
+	return Service{Items: catalog, PlayerRepo: players, InventoryRepo: inventory, Tx: fakeTransactionRunner{}}
 }
 
 func TestGrantGold(t *testing.T) {
@@ -103,6 +102,9 @@ func TestConsumeGold(t *testing.T) {
 	if res[0].Player == nil || res[0].Player.Gold != 60 {
 		t.Fatalf("player = %+v, want gold 60", res[0].Player)
 	}
+	if _, err := svc.Consume(context.Background(), "u1", []CostItem{{ItemID: gamedata.ItemIDGold, Count: 61}}, "test.consume", "r2-2"); !errors.Is(err, ErrInsufficientGold) {
+		t.Fatalf("err = %v, want ErrInsufficientGold", err)
+	}
 }
 
 func TestGrantInventoryStackItem(t *testing.T) {
@@ -128,6 +130,9 @@ func TestConsumeInventoryStackItem(t *testing.T) {
 	}
 	if res[0].Item == nil || res[0].Item.Count != 3 {
 		t.Fatalf("item = %+v, want count 3", res[0].Item)
+	}
+	if _, err := svc.Consume(context.Background(), "u1", []CostItem{{ItemID: gamedata.ItemIDBasicMaterial, Count: 4}}, "test.consume", "r4-2"); !errors.Is(err, ErrInsufficientItem) {
+		t.Fatalf("err = %v, want ErrInsufficientItem", err)
 	}
 }
 
@@ -274,10 +279,10 @@ func TestApplyRewardInTxRollsBackWithOuterTransaction(t *testing.T) {
 func TestApplyCostInTxConsumesMultipleAssets(t *testing.T) {
 	svc, dbRepo, gdb := newRealAssetService(t)
 	ctx := context.Background()
-	if _, err := dbRepo.ChangeGold(ctx, "u1", 100, gamedata.ItemIDGold, "test.prepare", "prepare-gold"); err != nil {
+	if _, err := svc.Grant(ctx, "u1", []RewardItem{{ItemID: gamedata.ItemIDGold, Count: 100}}, "test.prepare", "prepare-gold"); err != nil {
 		t.Fatalf("prepare gold: %v", err)
 	}
-	if _, err := dbRepo.ChangeInventoryItem(ctx, "u1", gamedata.ItemIDBasicMaterial, 5, "test.prepare", "prepare-item"); err != nil {
+	if _, err := svc.Grant(ctx, "u1", []RewardItem{{ItemID: gamedata.ItemIDBasicMaterial, Count: 5}}, "test.prepare", "prepare-item"); err != nil {
 		t.Fatalf("prepare item: %v", err)
 	}
 

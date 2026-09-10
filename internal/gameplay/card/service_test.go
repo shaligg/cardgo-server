@@ -71,7 +71,7 @@ func newTestCardService(t *testing.T) (Service, *cardTestRepository) {
 	if err != nil {
 		t.Fatalf("NewGameData: %v", err)
 	}
-	assets := asset.Service{Items: items, PlayerRepo: dbRepo.DBAssetRepository, InventoryRepo: dbRepo.DBAssetRepository}
+	assets := asset.Service{Items: items, PlayerRepo: dbRepo.DBAssetRepository, InventoryRepo: dbRepo.DBAssetRepository, Tx: idb.NewTxManager(db)}
 	return Service{Repo: dbRepo.DBCardRepository, Assets: assets, Tx: idb.NewTxManager(db), Data: data}, dbRepo
 }
 
@@ -118,7 +118,7 @@ func TestSaveDeckStoresLegalDeck(t *testing.T) {
 func TestUpgradeCardConsumesGoldAndLevelsUp(t *testing.T) {
 	svc, dbRepo := newTestCardService(t)
 	ctx := context.Background()
-	if _, err := dbRepo.ChangeGold(ctx, "u1", 100, gamedata.ItemIDGold, "test.grant", "gold-r1"); err != nil {
+	if _, err := svc.Assets.Grant(ctx, "u1", []asset.RewardItem{{ItemID: gamedata.ItemIDGold, Count: 100}}, "test.grant", "gold-r1"); err != nil {
 		t.Fatalf("grant gold: %v", err)
 	}
 	result, err := svc.UpgradeCard(ctx, "u1", 10001, "card-r1")
@@ -141,7 +141,7 @@ func TestUpgradeCardConsumesGoldAndLevelsUp(t *testing.T) {
 func TestUpgradeCardRejectsMissingConfiguredCost(t *testing.T) {
 	svc, dbRepo := newTestCardService(t)
 	ctx := context.Background()
-	if _, err := dbRepo.ChangeGold(ctx, "u1", 1000, gamedata.ItemIDGold, "test.grant", "gold-r1"); err != nil {
+	if _, err := svc.Assets.Grant(ctx, "u1", []asset.RewardItem{{ItemID: gamedata.ItemIDGold, Count: 1000}}, "test.grant", "gold-r1"); err != nil {
 		t.Fatalf("grant gold: %v", err)
 	}
 	if _, err := svc.UpgradeCard(ctx, "u1", 10001, "card-r1"); err != nil {

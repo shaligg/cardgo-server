@@ -1,6 +1,6 @@
 // Package repo 定义业务层依赖的持久化接口和领域数据结构。
 //
-// 具体实现负责事务、资产流水和数据库模型转换。
+// 具体实现负责事务内持久化、资产流水和数据库模型转换，事务边界由 Service 编排。
 package repo
 
 import (
@@ -33,12 +33,6 @@ var ErrInvalidReqID = errors.New("invalid req_id")
 
 // ErrInvalidAmount 表示资产变更数量非法。
 var ErrInvalidAmount = errors.New("invalid amount")
-
-// ErrInsufficientGold 表示玩家金币不足。
-var ErrInsufficientGold = errors.New("insufficient gold")
-
-// ErrInsufficientItem 表示玩家背包道具数量不足。
-var ErrInsufficientItem = errors.New("insufficient item")
 
 // ErrPlayerNotFound 表示玩家基础资料不存在。
 var ErrPlayerNotFound = errors.New("player not found")
@@ -149,12 +143,10 @@ type PlayerRepository interface {
 	CreateIfAbsent(ctx context.Context, player Player) (Player, error)
 }
 
-// PlayerAssetRepository 定义玩家主表字段类资产的写入能力。
-//
-// ChangeGold 必须保证资产变更和资产流水处于同一事务。
+// PlayerAssetRepository 定义玩家主表字段类资产的事务内持久化能力。
 type PlayerAssetRepository interface {
-	ChangeGold(ctx context.Context, uid string, delta int64, itemID int64, reason string, reqID string) (Player, error)
-	ChangeGoldInTx(ctx context.Context, tx *gorm.DB, uid string, delta int64, itemID int64, reason string, reqID string) (Player, error)
+	GetPlayerAssetInTx(ctx context.Context, tx *gorm.DB, uid string) (Player, error)
+	SaveGoldInTx(ctx context.Context, tx *gorm.DB, uid string, balance int64, itemID int64, delta int64, reason string, reqID string) error
 }
 
 // InventoryRepository 定义通用可堆叠背包的查询能力。
@@ -162,12 +154,10 @@ type InventoryRepository interface {
 	GetInventory(ctx context.Context, uid string) ([]InventoryItem, error)
 }
 
-// InventoryAssetRepository 定义通用可堆叠背包资产的写入能力。
-//
-// ChangeInventoryItem 必须保证扣费不为负，并让资产变更和流水处于同一事务。
+// InventoryAssetRepository 定义通用可堆叠背包资产的事务内持久化能力。
 type InventoryAssetRepository interface {
-	ChangeInventoryItem(ctx context.Context, uid string, itemID int64, delta int64, reason string, reqID string) (InventoryItem, error)
-	ChangeInventoryItemInTx(ctx context.Context, tx *gorm.DB, uid string, itemID int64, delta int64, reason string, reqID string) (InventoryItem, error)
+	GetOrCreateInventoryItemInTx(ctx context.Context, tx *gorm.DB, uid string, itemID int64) (InventoryItem, error)
+	SaveInventoryItemInTx(ctx context.Context, tx *gorm.DB, item InventoryItem, delta int64, reason string, reqID string) error
 }
 
 // PlayerLevelProgress 是业务层使用的玩家关卡通关记录。

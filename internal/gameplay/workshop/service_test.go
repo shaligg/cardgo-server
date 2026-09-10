@@ -54,7 +54,7 @@ func newTestWorkshopService(t *testing.T) (Service, *workshopTestRepository, *go
 	if err != nil {
 		t.Fatalf("NewWorkshopData: %v", err)
 	}
-	assets := asset.Service{Items: items, PlayerRepo: dbRepo.DBAssetRepository, InventoryRepo: dbRepo.DBAssetRepository}
+	assets := asset.Service{Items: items, PlayerRepo: dbRepo.DBAssetRepository, InventoryRepo: dbRepo.DBAssetRepository, Tx: idb.NewTxManager(db)}
 	return Service{Repo: dbRepo.DBWorkshopRepository, Assets: assets, Tx: idb.NewTxManager(db), Players: dbRepo.DBPlayerRepository, Data: workshopData}, dbRepo, db
 }
 
@@ -84,10 +84,10 @@ func TestGetOverviewCreatesDefaultWorkshop(t *testing.T) {
 func TestUpgradeFacilityConsumesGoldAndLevelsUp(t *testing.T) {
 	svc, dbRepo, _ := newTestWorkshopService(t)
 	ctx := context.Background()
-	if _, err := dbRepo.ChangeGold(ctx, "u1", 200, gamedata.ItemIDGold, "test.grant", "gold-r1"); err != nil {
+	if _, err := svc.Assets.Grant(ctx, "u1", []asset.RewardItem{{ItemID: gamedata.ItemIDGold, Count: 200}}, "test.grant", "gold-r1"); err != nil {
 		t.Fatalf("grant gold: %v", err)
 	}
-	if _, err := dbRepo.ChangeInventoryItem(ctx, "u1", gamedata.ItemIDBasicMaterial, 5, "test.grant", "mat-r1"); err != nil {
+	if _, err := svc.Assets.Grant(ctx, "u1", []asset.RewardItem{{ItemID: gamedata.ItemIDBasicMaterial, Count: 5}}, "test.grant", "mat-r1"); err != nil {
 		t.Fatalf("grant material: %v", err)
 	}
 
@@ -116,12 +116,12 @@ func TestUpgradeFacilityConsumesGoldAndLevelsUp(t *testing.T) {
 }
 
 func TestUpgradeFacilityUpdatesExistingFacility(t *testing.T) {
-	svc, dbRepo, _ := newTestWorkshopService(t)
+	svc, _, _ := newTestWorkshopService(t)
 	ctx := context.Background()
-	if _, err := dbRepo.ChangeGold(ctx, "u1", 500, gamedata.ItemIDGold, "test.grant", "gold-r1"); err != nil {
+	if _, err := svc.Assets.Grant(ctx, "u1", []asset.RewardItem{{ItemID: gamedata.ItemIDGold, Count: 500}}, "test.grant", "gold-r1"); err != nil {
 		t.Fatalf("grant gold: %v", err)
 	}
-	if _, err := dbRepo.ChangeInventoryItem(ctx, "u1", gamedata.ItemIDBasicMaterial, 10, "test.grant", "mat-r1"); err != nil {
+	if _, err := svc.Assets.Grant(ctx, "u1", []asset.RewardItem{{ItemID: gamedata.ItemIDBasicMaterial, Count: 10}}, "test.grant", "mat-r1"); err != nil {
 		t.Fatalf("grant material: %v", err)
 	}
 	if _, err := svc.UpgradeFacility(ctx, "u1", "oven", "facility-r1"); err != nil {
