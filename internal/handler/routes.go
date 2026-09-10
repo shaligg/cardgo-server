@@ -4,12 +4,12 @@ import (
 	"context"
 
 	"github.com/bigfish/go_orm_1/internal/contract/protocol"
-	assetsvc "github.com/bigfish/go_orm_1/internal/game/asset"
-	battlesvc "github.com/bigfish/go_orm_1/internal/game/battle"
-	cardsvc "github.com/bigfish/go_orm_1/internal/game/card"
-	inventorysvc "github.com/bigfish/go_orm_1/internal/game/inventory"
-	playersvc "github.com/bigfish/go_orm_1/internal/game/player"
-	workshopsvc "github.com/bigfish/go_orm_1/internal/game/workshop"
+	assetsvc "github.com/bigfish/go_orm_1/internal/domain/asset"
+	inventorysvc "github.com/bigfish/go_orm_1/internal/domain/inventory"
+	playersvc "github.com/bigfish/go_orm_1/internal/domain/player"
+	battlesvc "github.com/bigfish/go_orm_1/internal/gameplay/battle"
+	cardsvc "github.com/bigfish/go_orm_1/internal/gameplay/card"
+	workshopsvc "github.com/bigfish/go_orm_1/internal/gameplay/workshop"
 	"github.com/bigfish/go_orm_1/internal/globalcore"
 )
 

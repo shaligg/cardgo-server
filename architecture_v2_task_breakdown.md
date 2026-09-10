@@ -66,7 +66,7 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 - 将架构映射为工程结构与模块依赖关系。
 
 ### 任务
-1. 按 V2 文档创建分层目录骨架：`framework` 放网关/分发/传输，`platform` 放登录/鉴权/会话/在线状态，`game` 放玩法业务，`infra` 放基础设施；`internal/pkg` 只作为纯通用工具的预留规则，不预创建空包。
+1. 按 V2 文档创建分层目录骨架：`framework` 放网关/分发/传输，`platform` 放登录/鉴权/会话/在线状态，`domain` 放基础业务能力，`gameplay` 放具体玩法，`infra` 放基础设施；`internal/pkg` 只作为纯通用工具的预留规则，不预创建空包。
 2. 增加 `platform/login` 模块骨架（handler/allocator/ticket issuer）。
 3. 定义模块依赖规则（禁止反向依赖、禁止跨层直连，`internal/pkg` 只能被引用，不能引用业务/框架/平台/仓储/基础设施）。
 4. 创建统一错误码、日志字段、trace_id 规范。
@@ -380,6 +380,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 15. DONE：新增 `internal/globalserver` 最小契约包，先落地排行榜结算、批量邮件和通用 Job 接口；MVP 同进程直调，未来独立公共服时在接口外层增加 transport adapter。
 16. DONE：补齐 `internal/globalcore` 的 Friend/Mail/Notice 初始接口契约；Friend 后续已在“当前后续任务”第 16 项升级为完整基础闭环。
 17. DONE：删除旧 `WorldService` 公告口径，公告统一收敛到 `NoticeService`，避免公共领域核心出现两套命名。
+18. DONE：将原 `internal/game` 按职责拆为 `internal/domain` 与 `internal/gameplay`；只调整目录和依赖口径，不改变协议、业务逻辑或事务边界。
 
 目标：
 
@@ -392,7 +393,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 3. DONE：实现 `card.get_cards(1201)`，新玩家会自动补齐初始 5 张卡。
 4. DONE：实现 `card.save_deck(1202)`，校验数量、重复卡、配置存在和玩家拥有关系。
 5. DONE：实现 `card.upgrade(1203)`，升级消耗已接入 `CardConfig.upgrade_costs`，资产扣费和卡牌升级处于同一事务，普通重试由 Dispatcher 近期结果缓存保护；具体数值后续按策划表继续调优。
-6. DONE：新增 `internal/game/card` 单元测试，覆盖查询、合法卡组、非法卡组、升级扣费。
+6. DONE：新增 `internal/gameplay/card` 单元测试，覆盖查询、合法卡组、非法卡组、升级扣费。
 
 验收：
 

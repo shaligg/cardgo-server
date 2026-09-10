@@ -62,7 +62,8 @@ cmd/gameserver/main.go
   -> internal/handler.Dispatcher
   -> internal/handler.Router
   -> internal/handler.*Handler
-  -> internal/game/*Service
+  -> internal/gameplay/*Service（具体玩法）
+  -> internal/domain/*Service（基础业务能力，可选）
   -> internal/repo
   -> internal/infra/db
 ```
@@ -72,7 +73,8 @@ cmd/gameserver/main.go
 ```text
 internal/framework     框架与网关
 internal/platform      登录、鉴权、会话、在线状态
-internal/game          玩法业务
+internal/domain        玩家、资产、背包等基础业务能力
+internal/gameplay      卡牌、战斗、工坊等具体玩法编排
 internal/repo          数据访问
 internal/infra         基础设施
 internal/contract      协议契约
@@ -80,11 +82,12 @@ internal/app/gameserver 应用装配、生命周期、配置
 internal/handler       游戏业务协议入口
 ```
 
-当前已经完成两步收敛：
+当前已经完成三步收敛：
 
 ```text
 业务协议 handler 已从 internal/app 迁移到 internal/handler。
 gameserver 启动装配已从 internal/app 迁移到 internal/app/gameserver。
+原 internal/game 已按职责拆为 internal/domain 和 internal/gameplay。
 ```
 
 现在位于 `app/gameserver` 的文件：
@@ -124,7 +127,8 @@ HTTP 管理入口已从 `bootstrap.go` 拆出到 `admin_http.go`，避免启动�
 | `app` | 应用装配、启动、关闭、配置 | 玩法规则、协议细节堆积 |
 | `framework/gateway` | 连接、收包、发包、心跳、限流、编解码 | 调用具体玩法 service |
 | `handler` | op_code 路由、payload 解析、参数校验、调用 service、错误转换 | 直接查库、写玩法核心规则 |
-| `game` | 玩法规则、状态流转、奖励/消耗编排 | 解析 WS JSON、操作连接对象 |
+| `domain` | 玩家、资产、背包等可复用基础业务能力 | 反向依赖具体玩法、解析 WS JSON |
+| `gameplay` | 具体玩法规则、状态流转、奖励/消耗编排 | 解析 WS JSON、操作连接对象 |
 | `repo` | 数据读写、事务内写入、资产流水 | 判断玩法是否可领奖、是否通关；处理普通网络重试 |
 | `infra` | DB/Redis/log/metrics 驱动封装 | 具体业务规则 |
 | `platform` | 登录、鉴权、session、在线状态 | 卡牌/工坊/关卡等玩法规则 |
@@ -141,7 +145,7 @@ HTTP 管理入口已从 `bootstrap.go` 拆出到 `admin_http.go`，避免启动�
 | 方案 | 核心做法 | 改动量 | 清晰度 | 扩展性 | 当前推荐 |
 |---|---|---:|---:|---:|---|
 | 方案 A：保持现状 | `app` 继续放启动装配，`handler` 已独立 | 低 | 中高 | 中 | 已不采用 |
-| 方案 B：横向分层 | `app/gameserver` 管启动，`handler` 管协议，`game` 管玩法 | 中 | 高 | 高 | 已采用 |
+| 方案 B：横向分层 | `app/gameserver` 管启动，`handler` 管协议，`domain/gameplay` 管业务 | 中 | 高 | 高 | 已采用 |
 | 方案 C：纵向玩法模块 | 每个玩法目录内放 handler/service/repo | 高 | 中 | 中高 | 只适合局部复杂玩法借鉴 |
 | 方案 D：进程优先 | 先按 gameserver/loginserver/globalserver 拆 | 高 | 中高 | 高 | 当前过重 |
 
@@ -230,10 +234,12 @@ internal/handler/
   workshop_handler.go
   helpers.go
 
-internal/game/
+internal/domain/
   player/
   asset/
   inventory/
+
+internal/gameplay/
   card/
   battle/
   workshop/
@@ -263,7 +269,7 @@ Client
   -> handler.Dispatcher
   -> handler.Router
   -> handler.CardHandler
-  -> game/card.Service
+  -> gameplay/card.Service
   -> repo
   -> DB
 ```
@@ -276,12 +282,12 @@ Client
   -> handler.Dispatcher
   -> handler.Router
   -> handler.CardHandler
-  -> game/card.Service
+  -> gameplay/card.Service
   -> repo
   -> DB
 ```
 
-`handler`、`game`、`repo` 不需要因为 WS/TCP 变化而改目录。
+`handler`、`domain`、`gameplay`、`repo` 不需要因为 WS/TCP 变化而改目录。
 
 ### 6.3 优点
 
@@ -293,7 +299,7 @@ Client
 
 ### 6.4 缺点
 
-1. 新增玩法时通常要改多个目录：`contract`、`handler`、`game`、`repo`、`gamedata`。
+1. 新增玩法时通常要改多个目录：`contract`、`handler`、`gameplay`、`repo`、`gamedata`。
 2. 看单个玩法时，需要在不同目录间跳转。
 3. 需要明确约束：handler 只做协议适配，不能写业务规则。
 
@@ -316,7 +322,7 @@ Client
 app 混入 handler。
 ```
 
-同时不会过度拆分 `game/*` 和 `repo/*`。
+同时不会过度拆分 `gameplay/*` 和 `repo/*`。
 
 ## 7. 方案 C：纵向玩法模块
 
@@ -359,7 +365,7 @@ internal/contract/
 或者：
 
 ```text
-internal/game/card/
+internal/gameplay/card/
   handler.go
   service.go
   repo.go
@@ -378,7 +384,7 @@ internal/game/card/
 2. 每个玩法都可能重复一套错误转换、协议解析、repo 约定。
 3. 统一 op_code 注册和统一协议出口仍然要额外维护。
 4. 早期容易写快，后期容易变成“每个模块都有自己的小框架”。
-5. 当前项目已经有 `game/*`、`repo/*`、`handler` 拟拆分方向，改成全纵向迁移成本偏大。
+5. 当前项目已经有 `domain/*`、`gameplay/*`、`repo/*`、`handler` 分层，改成全纵向迁移成本偏大。
 
 ### 7.4 适用情况
 
@@ -395,7 +401,7 @@ internal/game/card/
 但复杂玩法内部可以采用纵向拆分思想：
 
 ```text
-internal/game/activity/dice/
+internal/gameplay/activity/dice/
   service.go
   roll.go
   reward.go
@@ -525,13 +531,15 @@ internal/
       request.go
       response.go      # 需要时再加
 
-  game/
+  domain/
     player/
       service.go
     asset/
       service.go
     inventory/
       service.go
+
+  gameplay/
     card/
       service.go
     battle/
@@ -627,14 +635,14 @@ framework/gateway/kcp -> handler
 
 handler 不需要变。
 
-### 9.3 为什么不把 handler 放进 game/service
+### 9.3 为什么不把 handler 放进 gameplay
 
 有些成熟项目会这么做：
 
 ```text
-game/card/handler.go
-game/card/service.go
-game/card/repo.go
+gameplay/card/handler.go
+gameplay/card/service.go
+gameplay/card/repo.go
 ```
 
 但当前项目不推荐。
@@ -644,12 +652,12 @@ game/card/repo.go
 1. 你希望调用链清晰，协议层不要污染业务层。
 2. 后续可能替换 WS 为 TCP 或二进制协议。
 3. 当前已经有统一 op_code 注册表，集中 handler 更利于维护。
-4. `game/*` 应该专注玩法规则，不解析 JSON，不依赖协议错误码。
+4. `gameplay/*` 应该专注玩法规则，不解析 JSON，不依赖协议错误码。
 
 允许复杂玩法内部拆多文件：
 
 ```text
-internal/game/activity/dice/
+internal/gameplay/activity/dice/
   service.go
   roll.go
   reward.go
@@ -670,11 +678,11 @@ internal/handler/dice_handler.go
 
 ```text
 internal/handler/dice_handler.go
-internal/game/activity/dice/service.go
-internal/game/activity/dice/roll.go
-internal/game/activity/dice/reward.go
-internal/game/activity/dice/settle.go
-internal/game/activity/dice/errors.go
+internal/gameplay/activity/dice/service.go
+internal/gameplay/activity/dice/roll.go
+internal/gameplay/activity/dice/reward.go
+internal/gameplay/activity/dice/settle.go
+internal/gameplay/activity/dice/errors.go
 internal/repo/dice_repo.go                 # 只有需要持久化时加
 internal/repo/model/dice.go                # 只有需要新表时加
 internal/gamedata/dice_config.go           # 只有需要策划配置时加
@@ -698,8 +706,8 @@ Client
   -> handler.Dispatcher.Handle(uid, op_code, payload)
   -> handler.Router.Handle(op_code)
   -> DiceHandler.Roll
-  -> game/activity/dice.Service.Roll
-  -> asset.Service.Consume / asset.Service.Grant
+  -> gameplay/activity/dice.Service.Roll
+  -> domain/asset.Service.Consume / domain/asset.Service.Grant
   -> repo.DiceRepository.SaveState
   -> response
 ```
@@ -707,8 +715,8 @@ Client
 ### 10.4 约束
 
 1. Handler 只拆包、校验参数、调用 service。
-2. Service 决定玩法规则、奖励内容、状态变化。
-3. AssetService 统一扣费和发奖。
+2. Gameplay Service 决定玩法规则、奖励内容、状态变化。
+3. Domain Service 提供可复用基础业务能力，`domain/asset.Service` 统一扣费和发奖。
 4. Repo 只负责数据读写和事务内写入能力。
 5. 配置读取和校验放在 `gamedata`。
 
@@ -796,12 +804,27 @@ internal/app/gameserver/admin_http.go
 
 `bootstrap.go` 只保留 `buildAPIMux(...)` 调用，不直接展开 health、metrics、drain 和 session 路由细节。
 
+### 11.4 第四步：拆分 domain 与 gameplay（已完成）
+
+目标：区分可复用基础业务能力和具体玩法编排，不改变运行逻辑。
+
+```text
+internal/game/player     -> internal/domain/player
+internal/game/asset      -> internal/domain/asset
+internal/game/inventory  -> internal/domain/inventory
+internal/game/card       -> internal/gameplay/card
+internal/game/battle     -> internal/gameplay/battle
+internal/game/workshop   -> internal/gameplay/workshop
+```
+
+依赖方向为 `handler -> gameplay -> domain -> repo`；简单基础协议允许 `handler -> domain -> repo`。
+
 ## 12. 迁移风险
 
 | 风险 | 说明 | 控制方式 |
 |---|---|---|
 | import 路径改错 | 移动包后最常见 | 每步只移动一类文件，立即 `go test ./...` |
-| 循环依赖 | `handler` 调 `game`，`app` 调 `handler`，不能反向 | 明确禁止 `game` import `handler/app` |
+| 循环依赖 | `handler` 调业务层，`app` 调 `handler`，不能反向 | 禁止 `domain/gameplay` import `handler/app`，禁止 `domain` import `gameplay` |
 | 过度抽象 | 为了目录漂亮创造无意义接口 | 只移动目录，不新增业务抽象 |
 | 新人迷路 | 目录变多后查找成本上升 | 保留 `handler/routes.go` 作为协议总入口 |
 | 文档过期 | 代码目录变了，文档没改 | 迁移完成后同步技术架构文档 |
@@ -812,7 +835,8 @@ internal/app/gameserver/admin_http.go
 
 ```text
 已采用方案 B：handler 从 app 拆出，app 收敛为 app/gameserver。
-长期：复杂玩法在 game/activity/<name> 内部纵向拆文件，但 handler 仍然集中。
+基础业务能力与具体玩法已分别放入 domain 和 gameplay。
+长期：复杂玩法在 gameplay/activity/<name> 内部纵向拆文件，但 handler 仍然集中。
 ```
 
 不建议现在做：
@@ -828,5 +852,6 @@ internal/app/gameserver/admin_http.go
 1. 完成方案对比文档。
 2. 迁移 internal/handler。
 3. 迁移 internal/app/gameserver。
-4. 每一步后跑 go test ./...。
+4. 拆分 internal/domain 与 internal/gameplay。
+5. 每一步后跑 go test ./...。
 ```

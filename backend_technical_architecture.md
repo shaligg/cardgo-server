@@ -226,12 +226,25 @@ Client -> AccessGateway ==少量内网复用连接==> GameServer
 - 重连恢复会话上下文
 - 断线回收
 
-### 5.5 game（业务模块）
-- 承载 MVP 主链路业务模块
-- 子域：`player`、`asset`、`inventory`、`card`、`deck`、`order`、`battle`、`workshop`
-- 通过领域 `Repository` 访问持久化数据；只有存在多实现、跨模块复用或测试替换需求时才抽接口
-- 不直接触碰 Redis/SQL 细节
-- 不承载好友、聊天、公会、邮件、排行榜等跨玩家公共域完整逻辑
+### 5.5 domain 与 gameplay（本地业务模块）
+
+`domain` 是可被多个玩法复用的基础业务能力：
+
+- 当前子域：`player`、`asset`、`inventory`。
+- 负责玩家资料、统一资产变更、背包道具等稳定业务规则。
+- 可以被 Handler、`gameplay` 和同进程 `globalserver` 调用，但不能反向依赖具体玩法。
+
+`gameplay` 是具体玩法或系统编排：
+
+- 当前子域：`card`、`battle`、`workshop`；后续活动按需增加子目录。
+- 负责玩法状态、规则判定和跨领域调用编排，可以调用一个或多个 `domain` Service。
+- 简单资料、资产或背包协议可以由 Handler 直接调用 `domain`，不强制增加空的玩法层。
+
+共同约束：
+
+- 通过领域 `Repository` 访问持久化数据；只有存在多实现、跨模块复用或测试替换需求时才抽接口。
+- 不直接触碰 Redis/SQL 细节。
+- 不承载好友、聊天、公会、邮件、排行榜等跨玩家公共域完整逻辑。
 
 ### 5.5.1 globalcore 与 globalserver
 - 目标：收敛跨玩家公共域逻辑，避免散落在各业务模块。
@@ -265,7 +278,7 @@ Client -> AccessGateway ==少量内网复用连接==> GameServer
 示例：
 
 ```text
-game/battle
+gameplay/battle
   -> rank.UpdateScore()
 
 MVP:
@@ -277,7 +290,7 @@ MVP:
 排行榜赛季结算:
   globalserver/rank.SettleSeason()
     -> globalcore/rank.CalcSeasonRewards()
-    -> game/asset.Service.ApplyRewardInTx()
+    -> domain/asset.Service.ApplyRewardInTx()
 ```
 
 判断规则：
@@ -285,9 +298,9 @@ MVP:
 1. 公共领域接口、DTO、Local/Remote 适配和可复用公共规则，放 `globalcore`。
 2. 周期结算、批处理、跨服聚合、公共服进程入口逻辑，放 `globalserver`。
 3. 需要跨多个 GameServer 实时统一状态时，`globalcore` 可替换为 remote client。
-4. game 模块不直接操作 globalcore 的内部 DB 表、Redis key、ZSET 或内存结构。
+4. domain/gameplay 模块不直接操作 globalcore 的内部 DB 表、Redis key、ZSET 或内存结构。
 5. GameServer 主链路不依赖独立 `globalserver` 进程启动；MVP 可同进程调用其代码。
-6. 发奖执行仍通过 `game/asset` 的接口完成，`globalcore/globalserver` 不直接改玩家资产表和在线内存。
+6. 发奖执行仍通过 `domain/asset` 的接口完成，`globalcore/globalserver` 不直接改玩家资产表和在线内存。
 
 ### 5.5.2 可迁移代码边界与反过度拆分原则
 不是所有业务都需要按远程服务形态设计。MVP 的目标是快速形成可运行 Demo，同时保留未来必要的拆分空间。
@@ -342,16 +355,16 @@ MVP:
 | `session` | 会话管理 | 本地 |
 | `dispatcher` | 玩家分片执行 | 本地 |
 | `state` | 玩家归属周期核对 | 本地 |
-| `game/player` | 玩家资料 | 本地 |
-| `game/asset` | 资产与资源流水 | 本地 |
-| `game/inventory` | 背包道具 | 本地 |
-| `game/card` | 卡牌库存与升级 | 本地 |
-| `game/deck` | 卡组编辑 | 本地 |
-| `game/order` | 订单玩法 | 本地 |
-| `game/battle` | 局内战斗运行时 | 本地 |
+| `domain/player` | 玩家资料 | 本地 |
+| `domain/asset` | 资产与资源流水 | 本地 |
+| `domain/inventory` | 背包道具 | 本地 |
+| `gameplay/card` | 卡牌库存与升级 | 本地 |
+| `gameplay/deck` | 卡组编辑 | 本地 |
+| `gameplay/order` | 订单玩法 | 本地 |
+| `gameplay/battle` | 局内战斗运行时 | 本地 |
 | `battle/worker` | 无状态战斗计算 | 迁移白名单 |
-| `game/workshop` | 工坊系统 | 本地 |
-| `game/economy` | 经济配置与公式 | 本地 |
+| `gameplay/workshop` | 工坊系统 | 本地 |
+| `gameplay/economy` | 经济配置与公式 | 本地 |
 | `globalcore/rank` | 排行榜接口、Local/Remote 适配、排行核心规则 | 迁移白名单 |
 | `globalcore/mail` | 邮件接口、Local/Remote 适配、附件/领取核心规则 | 迁移白名单 |
 | `globalcore/chat` | 聊天接口、Local/Remote 适配、消息核心规则 | 迁移白名单 |
@@ -390,9 +403,9 @@ MVP:
 说明：
 
 - “本地”不代表永远不能调整，而是当前实现不要预先做远程化结构。
-- `game/asset` 可暴露接口给 `globalserver` 发奖使用，但它本身仍是 GameServer 主业务模块。
+- `domain/asset` 可暴露接口给 `globalserver` 发奖使用，但它本身仍是 GameServer 主业务模块。
 - `repo/cache/infra/gamedata` 属于可复用基础代码，不归类为可迁移业务模块。
-- `globalcore` 可以被 `game/*`、`globalserver/*` 和未来独立公共服共同引用；但不能反向依赖 `handler`、`gateway/ws`、`session` 或 GameServer 私有运行态。
+- `globalcore` 可以被 `domain/*`、`gameplay/*`、`globalserver/*` 和未来独立公共服共同引用；但不能反向依赖 `handler`、`gateway/ws`、`session` 或 GameServer 私有运行态。
 
 实现原则：
 
@@ -407,15 +420,15 @@ MVP:
 
 ```text
 推荐抽接口:
-  game/battle -> globalcore/rank.RankService
+  gameplay/battle -> globalcore/rank.RankService
   原因: 排行榜未来可能迁移到 globalserver。
 
 不强制抽远程接口:
-  game/card -> card.ConfigValidator
+  gameplay/card -> card.ConfigValidator
   原因: 纯本地配置校验，不需要独立服务。
 
 保持本地内聚:
-  game/battle -> battle.Session
+  gameplay/battle -> battle.Session
   原因: 局内状态依赖本机内存和连接时序。
 ```
 
@@ -447,7 +460,7 @@ MVP:
 | `infra/redis` | 排行榜 ZSET、分布式锁、短期 job 状态 |
 | `infra/log` / `infra/metrics` | 日志、指标、告警 |
 | `globalcore` 接口 | 可复用公共领域接口与 DTO |
-| `game/asset` 接口 | 仅允许通过接口发奖或生成奖励记录，不能直接改玩家内存态 |
+| `domain/asset` 接口 | 仅允许通过接口发奖或生成奖励记录，不能直接改玩家内存态 |
 
 禁止依赖：
 
@@ -457,7 +470,7 @@ MVP:
 | `session.Manager` | 公共服不能依赖玩家当前是否在线 |
 | `dispatcher` | 公共服 job 不走玩家分片执行器 |
 | GameServer 私有运行态 | 局内状态和连接相关状态不能进入公共服 |
-| `game/battle` 局内内存态 | 战斗临时态不能成为公共服结算前置条件 |
+| `gameplay/battle` 局内内存态 | 战斗临时态不能成为公共服结算前置条件 |
 | `BizRouter` / `BizHandler` | 协议分发层不能反向进入公共服逻辑 |
 | 具体 `conn` / `client` 对象 | 公共服只产出结果，不直接推送连接 |
 
@@ -473,7 +486,7 @@ MVP:
 
 ```text
 玩家完成活动战斗:
-  game/battle.Settle()
+  gameplay/battle.Settle()
     -> globalcore/rank.UpdateScore(board_id, uid, score, req_id)
 
 排行榜赛季结束:
@@ -496,10 +509,10 @@ MVP:
 
 | 问题 | 放置位置 |
 |---|---|
-| 这是某个玩法自己的规则吗，例如摇骰子如何得分、关卡如何结算？ | `game/<feature>` |
+| 这是某个玩法自己的规则吗，例如摇骰子如何得分、关卡如何结算？ | `gameplay/<feature>` |
 | 这是公共领域接口、DTO、Local/Remote 适配或可复用规则吗？ | `globalcore/<domain>` |
 | 这是周期任务、批量扫描、赛季结算、失败重试或跨服聚合编排吗？ | `globalserver/<domain>` |
-| 这是统一发奖、扣费和资产流水吗？ | `game/asset` 接口 |
+| 这是统一发奖、扣费和资产流水吗？ | `domain/asset` 接口 |
 | 这是 DB 表读写、唯一键、事务内 CRUD 吗？ | `repo` |
 
 强制要求：
@@ -508,30 +521,27 @@ MVP:
 2. `globalserver` 不能读取 GameServer 私有内存，输入必须来自显式参数、DB 或 Redis。
 3. `LocalService` 与 `RemoteClient` 不允许复制两套业务规则；公共规则必须沉到 `globalcore`。
 4. 排行榜发奖这类公共规则放 `globalcore/rank`；排行榜赛季扫描、任务状态、重试和落库编排放 `globalserver/rank`。
-5. 发奖执行统一走 `game/asset` 接口，公共域模块不得直接修改玩家资产表或 GameServer 私有运行态。
+5. 发奖执行统一走 `domain/asset` 接口，公共域模块不得直接修改玩家资产表或 GameServer 私有运行态。
 6. 可迁移接口的请求参数必须是 DTO 或基础类型，不能传 ORM 对象、连接对象、在线内存对象、事务外游离对象或模块内部结构体。
 7. DTO 字段必须显式表达业务含义、幂等键和版本信息，不能依赖调用方上下文隐式补齐。
 8. 如果某模块不在迁移白名单，默认按本地简单实现，不额外制造 remote/client/adapter。
 
 ### 5.5.5 MVP 业务子模块
-| 模块 | 职责 | 数据写入要求 |
-|---|---|---|
-| `player` | 建号、基础资料、等级、章节进度 | A 类数据，事务写 |
-| `asset` | 金币、钻石、体力、声望、材料、碎片、发奖扣费、流水 | A 类数据，事务写；入口防重复 |
-| `inventory` | 普通道具、材料、宝箱、消耗券 | A 类数据，事务写；入口防重复 |
-| `card` | 卡牌库存、卡牌升级、碎片消耗 | A 类数据，事务写；入口防重复 |
-| `deck` | 卡组编辑、卡组保存、卡组校验 | A 类数据，事务写 |
-| `order` | 订单配置、订单生成、订单完成判定 | 结算时事务写 |
-| `battle` | 单局状态、出牌、回合推进、局内订单进度 | B 类在线状态，结算转 A 类 |
-| `workshop` | 工坊设施、升级、离线收益、装饰槽位 | A 类数据，事务写；入口防重复 |
-| `economy` | 奖励、消耗、资源价值换算配置辅助 | 默认无独立玩家表 |
+| 模块 | 类型 | 职责 | 数据写入要求 |
+|---|---|---|---|
+| `domain/player` | 基础领域 | 建号、基础资料、等级、章节进度 | A 类数据，事务写 |
+| `domain/asset` | 基础领域 | 金币、钻石、体力、声望、材料、碎片、发奖扣费、流水 | A 类数据，事务写；入口防重复 |
+| `domain/inventory` | 基础领域 | 普通道具、材料、宝箱、消耗券 | A 类数据，事务写；入口防重复 |
+| `gameplay/card` | 具体玩法 | 卡牌库存、卡牌升级、卡组编辑与校验 | A 类数据，事务写；入口防重复 |
+| `gameplay/battle` | 具体玩法 | 单局状态、出牌、回合推进、局内订单进度 | B 类在线状态，结算转 A 类 |
+| `gameplay/workshop` | 具体玩法 | 工坊设施、升级、离线收益、装饰槽位 | A 类数据，事务写；入口防重复 |
+| 后续 `gameplay/*` | 具体玩法 | 订单、活动及其他玩法规则 | 按玩法事务边界确定 |
 
 说明：
 
-- `battle` 的局内状态优先放内存，局结束后只写结算结果。
-- `asset` 是所有资源变化的唯一入口，其他模块不直接改金币、材料、碎片。
-- `order` 与 `battle` 可以同进程内直接调用，但接口上保持独立，便于后续把战斗计算拆成 Worker。
-- `economy` MVP 可先作为配置解析与工具函数，不一定单独成为复杂服务。
+- `gameplay/battle` 的局内状态优先放内存，局结束后只写结算结果。
+- `domain/asset` 是所有资源变化的统一入口，具体玩法不直接改金币、材料、碎片。
+- 具体玩法之间可以同进程内直接调用，但接口上保持清晰，便于后续按真实压力拆分计算模块。
 
 ### 5.6 state
 - 定时触发 Redis 玩家归属核对
@@ -1260,7 +1270,7 @@ MVP 至少需要以下业务表：
 - 新的登录、验票、会话、在线状态只放在 `internal/platform/*`。
 - 新的 DB、Redis、日志、监控封装只放在 `internal/infra/*`；业务专用 Store、Snapshot 或 Index 放在所属模块。
 - 新的玩家请求协议只放在 `internal/handler` 和 `internal/contract/protocol`。
-- 新的玩法业务只放在 `internal/game/*`、`internal/globalcore/*` 或 `internal/globalserver/*`。
+- 新的基础业务能力放在 `internal/domain/*`，具体玩法放在 `internal/gameplay/*`，跨玩家公共域放在 `internal/globalcore/*` 或 `internal/globalserver/*`。
 
 历史项目只用于查看架构演进，不作为新功能依赖，也不得通过相对路径重新引用回当前项目。
 
@@ -1296,7 +1306,7 @@ go_game_server/
 │   │   └── protocol/
 │   │       ├── opcode.go           # 全量 op_code 常量，禁止业务代码写裸数字
 │   │       └── request.go          # WS payload 请求 DTO，当前 JSON tag，未来可替换 protobuf DTO
-│   ├── framework/                  # 可复用框架代码，禁止 import game/*
+│   ├── framework/                  # 可复用框架代码，禁止 import domain/* 和 gameplay/*
 │   │   ├── gateway/
 │   │   │   └── ws/
 │   │   │       ├── server.go
@@ -1322,15 +1332,14 @@ go_game_server/
 │   │   │   └── manager.go
 │   │   ├── state/
 │   │   │   └── maintainer.go
-│   ├── game/
+│   ├── domain/                     # 可复用基础业务能力
 │   │   ├── player/
 │   │   ├── asset/
-│   │   ├── inventory/
+│   │   └── inventory/
+│   ├── gameplay/                   # 具体玩法与系统编排
 │   │   ├── card/                   # 卡牌库存、卡组编辑、卡牌升级
-│   │   ├── order/
 │   │   ├── battle/
-│   │   ├── workshop/
-│   │   └── economy/
+│   │   └── workshop/
 │   ├── globalcore/
 │   │   ├── core.go
 │   │   ├── friend_service.go
@@ -1411,21 +1420,22 @@ go_game_server/
 
 | 层 | 目录 | 允许依赖 | 禁止依赖 |
 |---|---|---|---|
-| 框架层 | `internal/framework` | 标准库、少量基础第三方库、必要的平台抽象接口 | `internal/game`、`internal/globalcore`、具体业务 Service |
+| 框架层 | `internal/framework` | 标准库、少量基础第三方库、必要的平台抽象接口 | `internal/domain`、`internal/gameplay`、`internal/globalcore`、具体业务 Service |
 | 协议契约层 | `internal/contract` | 标准库 | 具体 Handler、Service、Repo |
 | 平台层 | `internal/platform` | `internal/framework`、`internal/infra` | 具体玩法规则 |
-| 应用组装层 | `internal/app/gameserver` | `framework/platform/contract/game/repo/infra` | 不写核心业务规则 |
-| 业务层 | `internal/game`、`internal/globalcore`、`internal/globalserver` | `contract`、`repo`、`gamedata`、必要的 `platform` 接口 | `framework/gateway/ws` 这类网络接入实现 |
+| 应用组装层 | `internal/app/gameserver` | `framework/platform/contract/domain/gameplay/globalcore/globalserver/repo/infra` | 不写核心业务规则 |
+| 业务层 | `internal/domain`、`internal/gameplay`、`internal/globalcore`、`internal/globalserver` | `contract`、`repo`、`gamedata`、必要的 `platform` 接口 | `framework/gateway/ws` 这类网络接入实现 |
 | 数据与基础设施 | `internal/repo`、`internal/gamedata`、`internal/infra` | 标准库、数据库/Redis 驱动 | 具体 WS Handler、Gateway |
-| 项目内通用工具 | `internal/pkg` | 标准库、同层更底层 `internal/pkg/*` | `app`、`game`、`repo`、`infra`、`platform`、`framework` |
+| 项目内通用工具 | `internal/pkg` | 标准库、同层更底层 `internal/pkg/*` | `app`、`domain`、`gameplay`、`repo`、`infra`、`platform`、`framework` |
 
 核心原则：
 
-1. `framework` 是可复用框架代码，不能 import `game/*`。
-2. `game` 是玩法业务代码，不能直接依赖 WS 连接、客户端连接对象或网络包。
-3. `app` 是胶水层，负责把框架入口、协议 Handler、Service、Repo 组装起来。
-4. `contract/protocol` 只放协议号和请求 DTO，不放业务规则，也不放框架编解码实现。
-5. `internal/pkg` 是预留目录，不预创建空包；只在同类纯工具被两个以上模块复用时再抽出，例如字符串拆解、时间转换、通用权重随机算法。它只能被其他模块引用，不能反向引用业务、框架、平台、仓储或基础设施。
+1. `framework` 是可复用框架代码，不能 import `domain/*` 或 `gameplay/*`。
+2. `domain` 是可复用基础业务能力，不能反向依赖 `gameplay`；`gameplay` 可以调用 `domain` 完成具体玩法编排。
+3. `domain` 和 `gameplay` 都不能直接依赖 WS 连接、客户端连接对象或网络包。
+4. `app` 是胶水层，负责把框架入口、协议 Handler、Service、Repo 组装起来。
+5. `contract/protocol` 只放协议号和请求 DTO，不放业务规则，也不放框架编解码实现。
+6. `internal/pkg` 是预留目录，不预创建空包；只在同类纯工具被两个以上模块复用时再抽出，例如字符串拆解、时间转换、通用权重随机算法。它只能被其他模块引用，不能反向引用业务、框架、平台、仓储或基础设施。
 
 `internal/pkg` 使用规则：
 
@@ -1440,7 +1450,7 @@ go_game_server/
 1. 不建 `utils` 大包，按能力拆成 `randutil`、`timeutil`、`strutil` 等小包。
 2. 不提前创建空目录；默认先放在实际使用的模块内，出现跨模块复用后再抽到 `internal/pkg`。
 3. 工具函数参数和返回值应使用基础类型或泛型，不暴露 `Player`、`Card`、`Order` 等业务类型。
-4. 一旦函数需要理解业务含义，就移到对应的 `game/*` 或 `gamedata/*` 模块。
+4. 一旦函数需要理解业务含义，就移到对应的 `domain/*`、`gameplay/*` 或 `gamedata/*` 模块。
 
 ## 17. 配置契约（示例）
 ```yaml
@@ -1673,7 +1683,7 @@ type PlayerRepository interface {
 }
 ```
 
-### 18.5 Service
+### 18.5 Domain Service
 ```go
 package service
 
@@ -1689,7 +1699,7 @@ type PlayerService interface {
 }
 ```
 
-### 18.5.1 MVP Game Service
+### 18.5.1 Domain 与 Gameplay Service
 ```go
 package service
 
@@ -1732,11 +1742,13 @@ type CostItem struct {
 
 说明：
 
-1. `AssetService` 是资源扣除和发放的统一执行入口。
-2. `LevelService.SettleLevel` 生成 `RewardItem`，在结算事务内调用 `AssetService.ApplyRewardInTx`，并同时写关卡进度。
-3. `WorkshopService.UpgradeFacility` 生成 `CostItem`，在升级事务内调用 `AssetService.ApplyCostInTx`，并同时写设施等级。
-4. 所有写接口必须携带 `reqID`。
-5. 上述结构体是接口契约示意，代码实现时可放入各模块自己的 DTO。
+1. `PlayerService`、`AssetService` 属于 `domain`，提供可被多个玩法复用的基础业务能力。
+2. `CardService`、`LevelService`、`WorkshopService` 属于 `gameplay`，负责具体玩法规则和调用编排。
+3. `AssetService` 是资源扣除和发放的统一执行入口。
+4. `LevelService.SettleLevel` 生成 `RewardItem`，在结算事务内调用 `AssetService.ApplyRewardInTx`，并同时写关卡进度。
+5. `WorkshopService.UpgradeFacility` 生成 `CostItem`，在升级事务内调用 `AssetService.ApplyCostInTx`，并同时写设施等级。
+6. 所有写接口必须携带 `reqID`。
+7. 上述结构体是接口契约示意，代码实现时可放入各模块自己的 DTO。
 
 ### 18.6 可迁移接口 DTO 约束
 适用于 `globalcore`、`globalserver`、`RemoteClient`、未来独立服务 adapter 和 `battle/worker` 等可迁移边界。

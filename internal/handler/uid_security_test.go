@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/bigfish/go_orm_1/internal/domain/asset"
+	playergame "github.com/bigfish/go_orm_1/internal/domain/player"
 	terrors "github.com/bigfish/go_orm_1/internal/framework/transport/errors"
-	"github.com/bigfish/go_orm_1/internal/game/asset"
-	playergame "github.com/bigfish/go_orm_1/internal/game/player"
 	"github.com/bigfish/go_orm_1/internal/gamedata"
 	"github.com/bigfish/go_orm_1/internal/repo"
 	"github.com/bigfish/go_orm_1/internal/repo/model"

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/bigfish/go_orm_1/internal/framework/gateway/ws"
-	battlegame "github.com/bigfish/go_orm_1/internal/game/battle"
+	battlegame "github.com/bigfish/go_orm_1/internal/gameplay/battle"
 	ilog "github.com/bigfish/go_orm_1/internal/infra/log"
 	"github.com/bigfish/go_orm_1/internal/platform/session"
 )

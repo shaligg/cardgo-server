@@ -1,6 +1,6 @@
 // Package card 提供玩家卡牌库存、卡组编辑和卡牌成长规则。
 //
-// 协议解析在 app/card_handler.go，本包只关心业务校验与调用 repo/asset。
+// 协议解析在 handler/card_handler.go，本包只关心业务校验与调用 repo/domain service。
 package card
 
 import (
@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/bigfish/go_orm_1/internal/game/asset"
+	"github.com/bigfish/go_orm_1/internal/domain/asset"
 	"github.com/bigfish/go_orm_1/internal/gamedata"
 	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/repo"

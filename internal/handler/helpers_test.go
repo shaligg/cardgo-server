@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	terrors "github.com/bigfish/go_orm_1/internal/framework/transport/errors"
-	battlesvc "github.com/bigfish/go_orm_1/internal/game/battle"
-	cardsvc "github.com/bigfish/go_orm_1/internal/game/card"
+	battlesvc "github.com/bigfish/go_orm_1/internal/gameplay/battle"
+	cardsvc "github.com/bigfish/go_orm_1/internal/gameplay/card"
 	"github.com/bigfish/go_orm_1/internal/repo"
 )
 

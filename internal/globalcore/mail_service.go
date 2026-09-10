@@ -4,7 +4,7 @@ import "context"
 
 // RewardItem 是公共领域邮件附件使用的奖励 DTO。
 //
-// 这里不复用 game/asset 的结构，避免公共领域接口被 GameServer 具体资产实现绑死。
+// 这里不复用 domain/asset 的结构，避免公共领域接口被 GameServer 具体资产实现绑死。
 type RewardItem struct {
 	Type  string
 	ID    string

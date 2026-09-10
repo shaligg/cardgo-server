@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bigfish/go_orm_1/internal/game/asset"
+	"github.com/bigfish/go_orm_1/internal/domain/asset"
 	"github.com/bigfish/go_orm_1/internal/gamedata"
 	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/repo"

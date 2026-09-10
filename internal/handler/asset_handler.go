@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 
 	"github.com/bigfish/go_orm_1/internal/contract/protocol"
+	assetsvc "github.com/bigfish/go_orm_1/internal/domain/asset"
 	terrors "github.com/bigfish/go_orm_1/internal/framework/transport/errors"
-	assetsvc "github.com/bigfish/go_orm_1/internal/game/asset"
 )
 
 // AssetGrantItem 处理调试环境发放道具协议。

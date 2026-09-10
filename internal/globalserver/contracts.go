@@ -9,7 +9,7 @@ import "context"
 
 // RewardItem 是公共服任务使用的奖励 DTO。
 //
-// 这里不直接引用 game/asset 的内部结构，避免未来 globalserver 独立部署时
+// 这里不直接引用 domain/asset 的内部结构，避免未来 globalserver 独立部署时
 // 被 GameServer 的具体实现绑死。真正发奖仍由资产服务负责执行。
 type RewardItem struct {
 	Type  string

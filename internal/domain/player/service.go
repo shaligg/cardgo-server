@@ -3,7 +3,7 @@ package player
 import (
 	"context"
 
-	"github.com/bigfish/go_orm_1/internal/game/asset"
+	"github.com/bigfish/go_orm_1/internal/domain/asset"
 	"github.com/bigfish/go_orm_1/internal/gamedata"
 	"github.com/bigfish/go_orm_1/internal/repo"
 )

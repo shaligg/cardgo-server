@@ -3,11 +3,11 @@ package handler
 import (
 	"errors"
 
+	assetsvc "github.com/bigfish/go_orm_1/internal/domain/asset"
 	terrors "github.com/bigfish/go_orm_1/internal/framework/transport/errors"
-	assetsvc "github.com/bigfish/go_orm_1/internal/game/asset"
-	battlesvc "github.com/bigfish/go_orm_1/internal/game/battle"
-	cardsvc "github.com/bigfish/go_orm_1/internal/game/card"
-	workshopsvc "github.com/bigfish/go_orm_1/internal/game/workshop"
+	battlesvc "github.com/bigfish/go_orm_1/internal/gameplay/battle"
+	cardsvc "github.com/bigfish/go_orm_1/internal/gameplay/card"
+	workshopsvc "github.com/bigfish/go_orm_1/internal/gameplay/workshop"
 	"github.com/bigfish/go_orm_1/internal/globalcore"
 	"github.com/bigfish/go_orm_1/internal/repo"
 )

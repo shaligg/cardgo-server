@@ -173,8 +173,8 @@ globalserver/*
 原则：
 
 ```text
-game/* 不拥有好友、聊天、公会、邮件、排行榜的核心状态和核心规则。
-game/* 可以通过接口调用 globalcore/*。
+domain/* 和 gameplay/* 不拥有好友、聊天、公会、邮件、排行榜的核心状态和核心规则。
+gameplay/* 可以通过接口调用 domain/* 和 globalcore/*；domain/* 不反向依赖 gameplay/*。
 globalcore/* 是公共领域核心，不等于独立公共服务进程，也不只是 client。
 globalserver/* 是公共服编排层，MVP 就可以有代码，但不独立启动、不做 RPC/HTTP 等数据传输层。
 ```
@@ -185,9 +185,9 @@ globalserver/* 是公共服编排层，MVP 就可以有代码，但不独立启�
 - 如果是公共领域核心规则，例如排行奖励分段、奖励生成、聊天消息校验、公会权限规则，放 `globalcore/*`。
 - 如果是全局周期结算、批量发奖、跨服聚合、赛季清算，放 `globalserver/*` 编排。
 - 如果 `globalcore/*` 的请求期逻辑未来需要跨多个 GameServer 实时统一状态、独立扩容、故障隔离或独立 SLA，再将 Local 实现替换为 RemoteClient。
-- game 可以调用 globalcore 接口，但不能直接操作 globalcore 的内部表、map、Redis key 或 ZSET。
+- gameplay 可以调用 globalcore 接口，但不能直接操作 globalcore 的内部表、map、Redis key 或 ZSET。
 - 初版 `globalserver/*` 由 GameServer 同进程直调；未来拆分时再补 `cmd/globalserver` 和传输层。
-- `globalserver/*` 可以复用 `globalcore/*` 规则和 `game/asset` 发奖接口，但不能依赖连接、session 或 GameServer 私有运行态。
+- `globalserver/*` 可以复用 `globalcore/*` 规则和 `domain/asset` 发奖接口，但不能依赖连接、session 或 GameServer 私有运行态。
 - 只有需要或未来可能迁移的模块才按可远程化方式实现，不把所有本地业务强行套成 service/client/adapter。
 - 强依赖连接、在线内存、局内状态、单玩家高频轻逻辑的业务，优先保持 GameServer 本地内聚。
 - 可迁移模块以技术文档中的“可迁移模块列表”为准；列表外默认简单本地实现。
@@ -202,7 +202,7 @@ globalserver/* 是公共服编排层，MVP 就可以有代码，但不独立启�
 
 ```text
 活动 A 玩家完成一局并提交排行榜分数：
-  game/activity_a
+  gameplay/activity_a
     -> globalcore/rank.UpdateScore(board_id, uid, score, req_id)
     -> globalcore/rank 内部可以本地执行 Redis ZADD / DB 记录
 
@@ -218,7 +218,8 @@ globalserver/* 是公共服编排层，MVP 就可以有代码，但不独立启�
 ```text
 Gateway / Transport
   -> Handler / BizRouter
-  -> Service
+  -> Gameplay Service（具体玩法编排，可选）
+  -> Domain Service（玩家、资产、背包等通用业务能力）
   -> Repository
   -> Model
   -> DB
@@ -228,7 +229,9 @@ Gateway / Transport
 
 - `Gateway` 处理连接、协议、心跳、限流、背压。
 - `Handler` 只做协议参数解析和调用 Service。
-- `Service` 承载业务规则。
+- `Gameplay Service` 承载具体玩法规则与跨领域编排，可以调用一个或多个 `Domain Service`。
+- `Domain Service` 承载玩家、资产、背包等可被多个玩法复用的基础业务能力，不能反向依赖具体玩法。
+- 简单的资料、资产或背包协议允许 `Handler -> Domain Service`，不强制增加空的 Gameplay Service。
 - `Repository` 只做数据库访问，按业务聚合或事务边界组织，不按数据库表机械拆分。
 - `Store` 专指进程内存或 Redis 运行状态；需要持久化数据时由 Store 调用 Repository，Repository 不感知 Store。
 - `Model` 是持久化模型，不直接暴露给客户端。

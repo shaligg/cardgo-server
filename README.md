@@ -10,7 +10,7 @@ Cardgo Server is a game server demo that implements a complete client-to-databas
 
 - **WebSocket Gateway** — connection upgrade, HMAC ticket authentication, nonce-based replay protection, heartbeat, rate limiting, graceful shutdown
 - **Shard Dispatcher** — per-player serial execution via 64-way sharded locks; ensures data consistency without blocking different players
-- **6 Game Modules** — Player, Asset, Card, Battle, Inventory, Workshop; each with its own service + repository + model
+- **6 Business Modules** — Player, Asset, Inventory under `domain`; Card, Battle, Workshop under `gameplay`
 - **Session Management** — in-process connection binding, Redis-backed cross-node ownership, kick-on-relogin
 - **Idempotency** — command cache with `req_id` + payload hash to handle network retry safely
 - **State Recovery** — same-node memory reuse, database reconstruction when local state is unavailable, TTL cleanup
@@ -26,7 +26,9 @@ internal/
     gateway/ws/          # WebSocket server, client, codec, limiter
     dispatcher/          # Shard executor (per-player serial)
     transport/           # DTO, error codes
-  game/                  # Business logic (player, asset, card, battle, inventory, workshop)
+  domain/                # Reusable business capabilities (player, asset, inventory)
+  gameplay/              # Concrete gameplay orchestration (card, battle, workshop)
+  globalcore/            # Cross-player domain contracts and local implementations
   handler/               # Router, dispatcher, protocol handlers
   repo/                  # Data access layer (GORM + MySQL)
   platform/
@@ -89,19 +91,20 @@ Edit the environment file under `configs/`. Database credentials are not written
 ## Architecture
 
 ```
-Client ──WS──▶ Gateway ──▶ Auth ──▶ Dispatcher (shard) ──▶ Router
-                                                              ├──▶ Player Service
-                                                              ├──▶ Asset Service
-                                                              ├──▶ Card Service
-                                                              ├──▶ Battle Service
-                                                              ├──▶ Inventory Service
-                                                              └──▶ Workshop Service
-                                                                    │
-                                                                    ▼
-                                                               Repository
-                                                                    │
-                                                                    ▼
-                                                               MySQL + Redis
+Client ──WS──▶ Gateway ──▶ Auth ──▶ Dispatcher (shard) ──▶ Router / Handler
+                                                                  │
+                 ┌────────────────────────────────────────────────┴──────────┐
+                 ▼                                                           ▼
+       Gameplay Service                                               Domain Service
+    (Card/Battle/Workshop)                                       (Player/Asset/Inventory)
+                 │                                                           │
+                 └──────────────▶ Domain Service ────────────────────────────┘
+                                     │
+                                     ▼
+                                Repository
+                                     │
+                                     ▼
+                                   MySQL
 ```
 
 ## Tech Stack
