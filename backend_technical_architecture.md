@@ -293,6 +293,39 @@ MVP:
     -> domain/asset.Service.ApplyRewardInTx()
 ```
 
+请求型公共域从本地调用迁移为远端调用时，统一采用以下边界：
+
+```text
+MVP 同进程：
+GameServer Handler
+  -> globalcore.GuildService（稳定接口）
+  -> globalcore.LocalGuildService（唯一业务规则实现）
+  -> repo.DBGuildRepository
+  -> MySQL / Redis
+
+拆为独立公共服后：
+GameServer Handler
+  -> globalcore.GuildService（接口不变）
+  -> globalcore.RemoteGuildClient（只负责 DTO 编解码、RPC 和错误转换）
+  -> RPC
+  -> GlobalServer transport adapter（只负责接入和鉴权）
+  -> globalcore.LocalGuildService（继续复用同一套业务规则）
+  -> repo.DBGuildRepository
+  -> MySQL / Redis
+```
+
+跨服模块划分规则：
+
+1. `globalcore/<domain>` 保存稳定 Service 接口、请求/返回 DTO、领域错误、核心规则和 LocalService；这些代码不是 GameServer 私有实现，可同时被 GameServer 和未来 GlobalServer 进程复用。
+2. `RemoteClient` 只替代调用路径，不实现权限、奖励、状态流转等业务规则；GameServer 的 Handler 仍依赖同一个 Service 接口，因此迁移时不修改协议和 Handler 主流程。
+3. 独立公共服的 `transport adapter` 只把 RPC/HTTP/MQ 请求转换为 `globalcore` DTO，再调用 LocalService；不能在 adapter 中复制业务判断。
+4. `globalserver/<domain>` 只放周期任务、批量扫描、跨服聚合、失败重试等进程级编排。仅把请求型 Guild/Chat/Rank Service 迁到远端，不代表必须把领域规则移动或复制到 `globalserver/<domain>`。
+5. `cmd/globalserver` 和 `internal/app/globalserver` 只负责独立进程入口、配置加载、依赖组装、transport 与生命周期；MVP 阶段没有独立进程时不提前创建。
+6. `repo`、`infra`、`gamedata` 是同仓库可复用基础代码。独立进程按自身配置创建 DB/Redis 连接和 Repository 实例，不复制数据访问实现，也不共享进程内对象。
+7. `globalcore` 的模块数量不等于进程数量。Guild、Chat、Rank 等可以先共同部署在一个 GlobalServer 进程中，只有出现独立扩容、故障隔离或 SLA 要求时才继续拆成单独服务。
+
+当前公会实现遵循上述规则：`LocalGuildService` 持有创建、申请、审批、退出、会长转让和解散规则，`DBGuildRepository` 只持久化。未来远端化时新增 RemoteClient、公共服接入 adapter 和进程组装，不重写这套公会规则。
+
 判断规则：
 
 1. 公共领域接口、DTO、Local/Remote 适配和可复用公共规则，放 `globalcore`。
