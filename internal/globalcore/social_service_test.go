@@ -154,11 +154,24 @@ func assertFriendStatus(t *testing.T, service LocalFriendService, uid string, ot
 	}
 }
 
-func newSocialRepository(t *testing.T, uids ...string) *repo.DBPlayerRepository {
+type socialTestRepository struct {
+	*repo.DBPlayerRepository
+	*repo.DBFriendRepository
+	*repo.DBGuildRepository
+	*repo.DBChatRepository
+}
+
+func newSocialRepository(t *testing.T, uids ...string) *socialTestRepository {
 	t.Helper()
-	dbRepo := repo.NewDBPlayerRepository(testdb.OpenGame(t))
+	db := testdb.OpenGame(t)
+	dbRepo := &socialTestRepository{
+		DBPlayerRepository: repo.NewDBPlayerRepository(db),
+		DBFriendRepository: repo.NewDBFriendRepository(db),
+		DBGuildRepository:  repo.NewDBGuildRepository(db),
+		DBChatRepository:   repo.NewDBChatRepository(db),
+	}
 	for _, uid := range uids {
-		if _, err := dbRepo.GetByUID(context.Background(), uid); err != nil {
+		if _, err := dbRepo.DBPlayerRepository.GetByUID(context.Background(), uid); err != nil {
 			t.Fatalf("create player %s: %v", uid, err)
 		}
 	}

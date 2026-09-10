@@ -11,8 +11,18 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// DBGuildRepository 是基于 GORM 的公会、成员和申请仓储。
+type DBGuildRepository struct {
+	db *gorm.DB
+}
+
+// NewDBGuildRepository 创建公会仓储。
+func NewDBGuildRepository(db *gorm.DB) *DBGuildRepository {
+	return &DBGuildRepository{db: db}
+}
+
 // CreateGuild 在一个事务中创建公会并把创建者设为会长。
-func (r *DBPlayerRepository) CreateGuild(ctx context.Context, uid string, guildID string, name string, reqID string) (GuildRecord, error) {
+func (r *DBGuildRepository) CreateGuild(ctx context.Context, uid string, guildID string, name string, reqID string) (GuildRecord, error) {
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := lockSocialPlayer(tx, uid); err != nil {
 			return err
@@ -54,7 +64,7 @@ func (r *DBPlayerRepository) CreateGuild(ctx context.Context, uid string, guildI
 }
 
 // SearchGuilds 按名称搜索公会，并返回当前玩家的成员或申请状态。
-func (r *DBPlayerRepository) SearchGuilds(ctx context.Context, uid string, keyword string, afterID uint64, limit int) ([]GuildRecord, uint64, error) {
+func (r *DBGuildRepository) SearchGuilds(ctx context.Context, uid string, keyword string, afterID uint64, limit int) ([]GuildRecord, uint64, error) {
 	var rows []model.Guild
 	query := r.db.WithContext(ctx).Where("id > ?", afterID)
 	if keyword != "" {
@@ -73,7 +83,7 @@ func (r *DBPlayerRepository) SearchGuilds(ctx context.Context, uid string, keywo
 }
 
 // GetGuild 查询指定公会详情；guildID 为空时查询玩家当前所属公会。
-func (r *DBPlayerRepository) GetGuild(ctx context.Context, uid string, guildID string) (GuildRecord, error) {
+func (r *DBGuildRepository) GetGuild(ctx context.Context, uid string, guildID string) (GuildRecord, error) {
 	if guildID == "" {
 		var membership model.GuildMember
 		err := r.db.WithContext(ctx).Where("uid = ?", uid).Take(&membership).Error
@@ -118,7 +128,7 @@ func (r *DBPlayerRepository) GetGuild(ctx context.Context, uid string, guildID s
 }
 
 // ListGuildApplications 校验会长权限后分页查询待审批申请。
-func (r *DBPlayerRepository) ListGuildApplications(ctx context.Context, operatorUID string, guildID string, afterID uint64, limit int) ([]GuildApplicationRecord, uint64, error) {
+func (r *DBGuildRepository) ListGuildApplications(ctx context.Context, operatorUID string, guildID string, afterID uint64, limit int) ([]GuildApplicationRecord, uint64, error) {
 	var operator model.GuildMember
 	err := r.db.WithContext(ctx).Where("guild_id = ? AND uid = ?", guildID, operatorUID).Take(&operator).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -145,7 +155,7 @@ func (r *DBPlayerRepository) ListGuildApplications(ctx context.Context, operator
 	for _, row := range rows {
 		uids = append(uids, row.UID)
 	}
-	levels, err := r.playerLevels(ctx, uids)
+	levels, err := playerLevels(ctx, r.db, uids)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -166,7 +176,7 @@ func (r *DBPlayerRepository) ListGuildApplications(ctx context.Context, operator
 }
 
 // CreateGuildApplication 创建一条待会长审批的入会申请。
-func (r *DBPlayerRepository) CreateGuildApplication(ctx context.Context, uid string, guildID string, reqID string) error {
+func (r *DBGuildRepository) CreateGuildApplication(ctx context.Context, uid string, guildID string, reqID string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := lockSocialPlayer(tx, uid); err != nil {
 			return err
@@ -198,7 +208,7 @@ func (r *DBPlayerRepository) CreateGuildApplication(ctx context.Context, uid str
 }
 
 // ApproveGuildApplication 校验会长权限并把申请者加入公会。
-func (r *DBPlayerRepository) ApproveGuildApplication(ctx context.Context, operatorUID string, guildID string, targetUID string, reqID string) error {
+func (r *DBGuildRepository) ApproveGuildApplication(ctx context.Context, operatorUID string, guildID string, targetUID string, reqID string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var operator model.GuildMember
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("guild_id = ? AND uid = ?", guildID, operatorUID).Take(&operator).Error
@@ -240,7 +250,7 @@ func (r *DBPlayerRepository) ApproveGuildApplication(ctx context.Context, operat
 }
 
 // LeaveGuild 退出公会；会长退出时转让给最早加入的成员，无其他成员则解散公会。
-func (r *DBPlayerRepository) LeaveGuild(ctx context.Context, uid string) error {
+func (r *DBGuildRepository) LeaveGuild(ctx context.Context, uid string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := lockSocialPlayer(tx, uid); err != nil {
 			return err
@@ -294,7 +304,7 @@ func (r *DBPlayerRepository) LeaveGuild(ctx context.Context, uid string) error {
 }
 
 // GetGuildIDByUID 查询玩家当前所属公会，供公会聊天解析真实频道使用。
-func (r *DBPlayerRepository) GetGuildIDByUID(ctx context.Context, uid string) (string, error) {
+func (r *DBGuildRepository) GetGuildIDByUID(ctx context.Context, uid string) (string, error) {
 	var member model.GuildMember
 	err := r.db.WithContext(ctx).Where("uid = ?", uid).Take(&member).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -306,7 +316,7 @@ func (r *DBPlayerRepository) GetGuildIDByUID(ctx context.Context, uid string) (s
 	return member.GuildID, nil
 }
 
-func (r *DBPlayerRepository) buildGuildRecords(ctx context.Context, uid string, guilds []model.Guild) ([]GuildRecord, error) {
+func (r *DBGuildRepository) buildGuildRecords(ctx context.Context, uid string, guilds []model.Guild) ([]GuildRecord, error) {
 	if len(guilds) == 0 {
 		return []GuildRecord{}, nil
 	}

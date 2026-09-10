@@ -10,8 +10,11 @@ import (
 	"gorm.io/gorm"
 )
 
+// DBLevelProgressRepository 是基于 GORM 的关卡进度仓储。
+type DBLevelProgressRepository struct{}
+
 // GetLevelProgressInTx 在结算事务中读取玩家的关卡进度。
-func (r *DBPlayerRepository) GetLevelProgressInTx(ctx context.Context, tx *gorm.DB, uid string, levelID int64) (PlayerLevelProgress, error) {
+func (r *DBLevelProgressRepository) GetLevelProgressInTx(ctx context.Context, tx *gorm.DB, uid string, levelID int64) (PlayerLevelProgress, error) {
 	if tx == nil {
 		return PlayerLevelProgress{}, fmt.Errorf("transaction is nil")
 	}
@@ -30,7 +33,7 @@ func (r *DBPlayerRepository) GetLevelProgressInTx(ctx context.Context, tx *gorm.
 }
 
 // CreateLevelProgressInTx 创建业务层已经计算完成的关卡进度。
-func (r *DBPlayerRepository) CreateLevelProgressInTx(ctx context.Context, tx *gorm.DB, progress PlayerLevelProgress) error {
+func (r *DBLevelProgressRepository) CreateLevelProgressInTx(ctx context.Context, tx *gorm.DB, progress PlayerLevelProgress) error {
 	if tx == nil {
 		return fmt.Errorf("transaction is nil")
 	}
@@ -45,7 +48,7 @@ func (r *DBPlayerRepository) CreateLevelProgressInTx(ctx context.Context, tx *go
 }
 
 // UpdateLevelProgressInTx 更新业务层已经计算完成的关卡进度。
-func (r *DBPlayerRepository) UpdateLevelProgressInTx(ctx context.Context, tx *gorm.DB, progress PlayerLevelProgress) error {
+func (r *DBLevelProgressRepository) UpdateLevelProgressInTx(ctx context.Context, tx *gorm.DB, progress PlayerLevelProgress) error {
 	if tx == nil {
 		return fmt.Errorf("transaction is nil")
 	}

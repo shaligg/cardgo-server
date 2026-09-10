@@ -19,13 +19,6 @@ type fakePlayerRepo struct {
 	lastItemID int64
 }
 
-func (r *fakePlayerRepo) GetByUID(ctx context.Context, uid string) (repo.Player, error) {
-	if r.player.UID == "" {
-		r.player = repo.Player{UID: uid, Level: 1}
-	}
-	return r.player, nil
-}
-
 func (r *fakePlayerRepo) ChangeGold(ctx context.Context, uid string, delta int64, itemID int64, reason string, reqID string) (repo.Player, error) {
 	if r.player.UID == "" {
 		r.player = repo.Player{UID: uid, Level: 1}
@@ -40,16 +33,12 @@ func (r *fakePlayerRepo) ChangeGold(ctx context.Context, uid string, delta int64
 	return r.player, nil
 }
 
-type fakeInventoryRepo struct {
-	items map[int64]repo.InventoryItem
+func (r *fakePlayerRepo) ChangeGoldInTx(ctx context.Context, _ *gorm.DB, uid string, delta int64, itemID int64, reason string, reqID string) (repo.Player, error) {
+	return r.ChangeGold(ctx, uid, delta, itemID, reason, reqID)
 }
 
-func (r *fakeInventoryRepo) GetInventory(ctx context.Context, uid string) ([]repo.InventoryItem, error) {
-	out := make([]repo.InventoryItem, 0, len(r.items))
-	for _, item := range r.items {
-		out = append(out, item)
-	}
-	return out, nil
+type fakeInventoryRepo struct {
+	items map[int64]repo.InventoryItem
 }
 
 func (r *fakeInventoryRepo) ChangeInventoryItem(ctx context.Context, uid string, itemID int64, delta int64, reason string, reqID string) (repo.InventoryItem, error) {
@@ -68,7 +57,11 @@ func (r *fakeInventoryRepo) ChangeInventoryItem(ctx context.Context, uid string,
 	return current, nil
 }
 
-func newTestService(t *testing.T, players repo.PlayerRepository, inventory repo.InventoryRepository) Service {
+func (r *fakeInventoryRepo) ChangeInventoryItemInTx(ctx context.Context, _ *gorm.DB, uid string, itemID int64, delta int64, reason string, reqID string) (repo.InventoryItem, error) {
+	return r.ChangeInventoryItem(ctx, uid, itemID, delta, reason, reqID)
+}
+
+func newTestService(t *testing.T, players repo.PlayerAssetRepository, inventory repo.InventoryAssetRepository) Service {
 	t.Helper()
 	catalog, err := gamedata.NewCatalog([]gamedata.ItemConfig{
 		{ItemID: gamedata.ItemIDGold, Key: "gold", StorageType: gamedata.StoragePlayerField, StorageKey: "gold", Stackable: true},
@@ -77,7 +70,7 @@ func newTestService(t *testing.T, players repo.PlayerRepository, inventory repo.
 	if err != nil {
 		t.Fatalf("NewCatalog returned error: %v", err)
 	}
-	return Service{Items: catalog, Players: players, Inventory: inventory}
+	return Service{Items: catalog, PlayerRepo: players, InventoryRepo: inventory}
 }
 
 func TestGrantGold(t *testing.T) {
@@ -171,14 +164,20 @@ func TestApplyRewardInTxMergesDuplicatedItems(t *testing.T) {
 	}
 }
 
-func newRealAssetService(t *testing.T) (Service, *repo.DBPlayerRepository, *gorm.DB) {
+type realAssetTestRepository struct {
+	*repo.DBPlayerRepository
+	*repo.DBAssetRepository
+}
+
+func newRealAssetService(t *testing.T) (Service, *realAssetTestRepository, *gorm.DB) {
 	t.Helper()
 	gdb := testdb.OpenGame(t)
-	dbRepo := repo.NewDBPlayerRepository(gdb)
-	svc := newTestService(t, dbRepo, dbRepo)
+	dbRepo := &realAssetTestRepository{
+		DBPlayerRepository: repo.NewDBPlayerRepository(gdb),
+		DBAssetRepository:  repo.NewDBAssetRepository(gdb),
+	}
+	svc := newTestService(t, dbRepo.DBAssetRepository, dbRepo.DBAssetRepository)
 	svc.Tx = idb.NewTxManager(gdb)
-	svc.TxPlayers = dbRepo
-	svc.TxInventory = dbRepo
 	return svc, dbRepo, gdb
 }
 

@@ -10,13 +10,15 @@ import (
 )
 
 func TestFriendHandlerUsesAuthenticatedUID(t *testing.T) {
-	dbRepo := repo.NewDBPlayerRepository(testdb.OpenGame(t))
+	db := testdb.OpenGame(t)
+	playerRepo := repo.NewDBPlayerRepository(db)
+	friendRepo := repo.NewDBFriendRepository(db)
 	for _, uid := range []string{"auth_uid", "target_uid", "evil_uid"} {
-		if _, err := dbRepo.GetByUID(context.Background(), uid); err != nil {
+		if _, err := playerRepo.GetByUID(context.Background(), uid); err != nil {
 			t.Fatalf("create player %s: %v", uid, err)
 		}
 	}
-	friendService := globalcore.LocalFriendService{Repo: dbRepo}
+	friendService := globalcore.LocalFriendService{Repo: friendRepo}
 	h := &BizHandler{FriendService: friendService}
 
 	_, bizErr := h.FriendApply(context.Background(), "auth_uid", []byte(`{"uid":"evil_uid","target_uid":"target_uid","req_id":"friend-handler"}`))

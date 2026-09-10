@@ -32,14 +32,6 @@ func (r *blockingPlayerRepo) ChangeGoldInTx(ctx context.Context, tx *gorm.DB, ui
 	return r.fakePlayerRepo.ChangeGoldInTx(ctx, tx, uid, delta, itemID, reason, reqID)
 }
 
-func (r *fakePlayerRepo) GetByUID(ctx context.Context, uid string) (repo.Player, error) {
-	_ = ctx
-	if r.player.UID == "" {
-		r.player = repo.Player{UID: uid, Level: 1}
-	}
-	return r.player, nil
-}
-
 func (r *fakePlayerRepo) ChangeGold(ctx context.Context, uid string, delta int64, itemID int64, reason string, reqID string) (repo.Player, error) {
 	_ = ctx
 	_ = itemID
@@ -65,15 +57,6 @@ func (r *fakePlayerRepo) ChangeGoldInTx(ctx context.Context, tx *gorm.DB, uid st
 type fakeInventoryRepo struct {
 	items      map[int64]repo.InventoryItem
 	grantCalls int
-}
-
-func (r *fakeInventoryRepo) GetInventory(ctx context.Context, uid string) ([]repo.InventoryItem, error) {
-	_ = ctx
-	out := make([]repo.InventoryItem, 0, len(r.items))
-	for _, item := range r.items {
-		out = append(out, item)
-	}
-	return out, nil
 }
 
 func (r *fakeInventoryRepo) ChangeInventoryItem(ctx context.Context, uid string, itemID int64, delta int64, reason string, reqID string) (repo.InventoryItem, error) {
@@ -369,10 +352,10 @@ func TestDifferentPlayersDoNotShareBattleSessionLock(t *testing.T) {
 	}
 }
 
-func newTestBattleService(t *testing.T, players repo.PlayerRepository, inventory repo.InventoryRepository) *Service {
+func newTestBattleService(t *testing.T, players repo.PlayerAssetRepository, inventory repo.InventoryAssetRepository) *Service {
 	t.Helper()
 	gdb := testdb.OpenGame(t)
-	progressRepo := repo.NewDBPlayerRepository(gdb)
+	progressRepo := &repo.DBLevelProgressRepository{}
 	items, err := gamedata.NewCatalog([]gamedata.ItemConfig{
 		{ItemID: gamedata.ItemIDGold, Key: "gold", StorageType: gamedata.StoragePlayerField, StorageKey: "gold", Stackable: true},
 		{ItemID: gamedata.ItemIDBasicMaterial, Key: "basic_material", StorageType: gamedata.StorageInventoryStack, Stackable: true},
@@ -439,11 +422,9 @@ func newTestBattleService(t *testing.T, players repo.PlayerRepository, inventory
 		Tx:       idb.NewTxManager(gdb),
 		Progress: progressRepo,
 		Assets: asset.Service{
-			Items:       items,
-			Players:     players,
-			Inventory:   inventory,
-			TxPlayers:   players.(repo.TxPlayerRepository),
-			TxInventory: inventory.(repo.TxInventoryRepository),
+			Items:         items,
+			PlayerRepo:    players,
+			InventoryRepo: inventory,
 		},
 	}
 }

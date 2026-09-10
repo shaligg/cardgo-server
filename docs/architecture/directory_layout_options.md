@@ -589,10 +589,10 @@ internal/
     state/
 
   repo/
-    repository.go
-    player_repo.go
-    workshop_repo.go
-    model/
+    repository.go       # 窄接口和持久化 DTO
+    migration.go        # 当前进程的数据表迁移入口
+    *_repo.go           # 按聚合或事务边界组织的数据库实现
+    model/              # GORM 数据库模型
 
   infra/
     db/

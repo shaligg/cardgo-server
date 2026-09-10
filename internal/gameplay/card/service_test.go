@@ -12,10 +12,20 @@ import (
 	"github.com/bigfish/go_orm_1/internal/testutil/testdb"
 )
 
-func newTestCardService(t *testing.T) (Service, *repo.DBPlayerRepository) {
+type cardTestRepository struct {
+	*repo.DBPlayerRepository
+	*repo.DBAssetRepository
+	*repo.DBCardRepository
+}
+
+func newTestCardService(t *testing.T) (Service, *cardTestRepository) {
 	t.Helper()
 	db := testdb.OpenGame(t)
-	dbRepo := repo.NewDBPlayerRepository(db)
+	dbRepo := &cardTestRepository{
+		DBPlayerRepository: repo.NewDBPlayerRepository(db),
+		DBAssetRepository:  repo.NewDBAssetRepository(db),
+		DBCardRepository:   repo.NewDBCardRepository(db),
+	}
 	items, err := gamedata.NewCatalog([]gamedata.ItemConfig{
 		{ItemID: gamedata.ItemIDGold, Key: "gold", StorageType: gamedata.StoragePlayerField, StorageKey: "gold", Stackable: true},
 	})
@@ -58,8 +68,8 @@ func newTestCardService(t *testing.T) (Service, *repo.DBPlayerRepository) {
 	if err != nil {
 		t.Fatalf("NewGameData: %v", err)
 	}
-	assets := asset.Service{Items: items, Players: dbRepo, Inventory: dbRepo, TxPlayers: dbRepo, TxInventory: dbRepo}
-	return Service{Repo: dbRepo, Assets: assets, Tx: idb.NewTxManager(db), Data: data}, dbRepo
+	assets := asset.Service{Items: items, PlayerRepo: dbRepo.DBAssetRepository, InventoryRepo: dbRepo.DBAssetRepository}
+	return Service{Repo: dbRepo.DBCardRepository, Assets: assets, Tx: idb.NewTxManager(db), Data: data}, dbRepo
 }
 
 func TestGetCardsCreatesDefaultCards(t *testing.T) {

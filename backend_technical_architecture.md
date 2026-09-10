@@ -556,6 +556,9 @@ MVP:
 - `Repository` 只处理持久化语义，不计算玩法奖励、不判断公会权限、不编排发奖，也不生成面向客户端的响应。
 - `Repository` 不包含进程内缓存、Redis 缓存或在线玩家生命周期逻辑，不能感知玩家是否在线。
 - 数据库具体实现统一使用 `DB<Domain>Repository` 命名，例如 `DBPlayerRepository`、`DBAssetRepository`、`DBCardRepository`；禁止让一个 Repository 实现无关业务域的全部方法。
+- 当前实现按聚合拆为玩家资料、资产、卡牌/卡组、关卡进度、工坊、好友、公会和聊天仓储；共享同一个 GORM 连接池不代表共享同一个 Repository 类型。
+- `DBAssetRepository` 可以同时访问玩家表中的基础货币、背包表和资产流水表，因为它们共同属于一次资产变更事务；`DBPlayerRepository` 只负责玩家基础资料，不再承载其他领域方法。
+- 数据库表迁移由包级 `repo.Migrate` 负责，不挂在任何业务 Repository 上，避免启动职责依附于某个领域仓储。
 
 ### 5.8 模块专用内存结构
 - 当前不提供通用 L1/L2 业务读缓存，也不设置 `CachedRepository` 中间层。
@@ -1353,20 +1356,18 @@ go_game_server/
 │   ├── repo/
 │   │   ├── model/
 │   │   │   ├── player.go
-│   │   │   ├── asset.go
 │   │   │   ├── inventory.go
 │   │   │   ├── card.go
-│   │   │   ├── deck.go
 │   │   │   ├── level.go
 │   │   │   ├── workshop.go
 │   │   │   ├── social.go
-│   │   │   ├── idempotency.go
-│   │   │   ├── economy_log.go
+│   │   │   └── asset_log.go
 │   │   ├── repository.go
+│   │   ├── migration.go
 │   │   ├── player_repo.go
 │   │   ├── asset_repo.go
 │   │   ├── card_repo.go
-│   │   ├── order_repo.go
+│   │   ├── level_repo.go
 │   │   ├── workshop_repo.go
 │   │   ├── friend_repo.go
 │   │   ├── guild_repo.go

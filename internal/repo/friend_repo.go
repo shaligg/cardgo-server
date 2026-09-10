@@ -10,9 +10,19 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// DBFriendRepository 是基于 GORM 的好友关系仓储。
+type DBFriendRepository struct {
+	db *gorm.DB
+}
+
+// NewDBFriendRepository 创建好友关系仓储。
+func NewDBFriendRepository(db *gorm.DB) *DBFriendRepository {
+	return &DBFriendRepository{db: db}
+}
+
 // CreateFriendRequest 创建一条待审批好友关系。
-func (r *DBPlayerRepository) CreateFriendRequest(ctx context.Context, uid string, targetUID string, reqID string) error {
-	exists, err := r.playerExists(ctx, targetUID)
+func (r *DBFriendRepository) CreateFriendRequest(ctx context.Context, uid string, targetUID string, reqID string) error {
+	exists, err := playerExists(ctx, r.db, targetUID)
 	if err != nil {
 		return err
 	}
@@ -46,7 +56,7 @@ func (r *DBPlayerRepository) CreateFriendRequest(ctx context.Context, uid string
 }
 
 // ApproveFriendRequest 把目标玩家发起的申请转为好友关系。
-func (r *DBPlayerRepository) ApproveFriendRequest(ctx context.Context, uid string, targetUID string, reqID string) error {
+func (r *DBFriendRepository) ApproveFriendRequest(ctx context.Context, uid string, targetUID string, reqID string) error {
 	uidLow, uidHigh := orderedUIDPair(uid, targetUID)
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var row model.FriendRelation
@@ -73,7 +83,7 @@ func (r *DBPlayerRepository) ApproveFriendRequest(ctx context.Context, uid strin
 }
 
 // DeleteFriendRelation 删除好友关系或尚未处理的申请。
-func (r *DBPlayerRepository) DeleteFriendRelation(ctx context.Context, uid string, targetUID string) error {
+func (r *DBFriendRepository) DeleteFriendRelation(ctx context.Context, uid string, targetUID string) error {
 	uidLow, uidHigh := orderedUIDPair(uid, targetUID)
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var row model.FriendRelation
@@ -94,7 +104,7 @@ func (r *DBPlayerRepository) DeleteFriendRelation(ctx context.Context, uid strin
 }
 
 // ListFriendRelations 按关系 ID 正向分页查询好友和待处理申请。
-func (r *DBPlayerRepository) ListFriendRelations(ctx context.Context, uid string, afterID uint64, limit int) ([]FriendRecord, uint64, error) {
+func (r *DBFriendRepository) ListFriendRelations(ctx context.Context, uid string, afterID uint64, limit int) ([]FriendRecord, uint64, error) {
 	var rows []model.FriendRelation
 	query := r.db.WithContext(ctx).Where("(uid_low = ? OR uid_high = ?) AND id > ?", uid, uid, afterID)
 	if err := query.Order("id ASC").Limit(limit + 1).Find(&rows).Error; err != nil {
@@ -114,7 +124,7 @@ func (r *DBPlayerRepository) ListFriendRelations(ctx context.Context, uid string
 			otherUIDs = append(otherUIDs, row.UIDLow)
 		}
 	}
-	levels, err := r.playerLevels(ctx, otherUIDs)
+	levels, err := playerLevels(ctx, r.db, otherUIDs)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -145,27 +155,4 @@ func orderedUIDPair(uid string, targetUID string) (string, string) {
 		return uid, targetUID
 	}
 	return targetUID, uid
-}
-
-func (r *DBPlayerRepository) playerExists(ctx context.Context, uid string) (bool, error) {
-	var count int64
-	if err := r.db.WithContext(ctx).Model(&model.Player{}).Where("uid = ?", uid).Count(&count).Error; err != nil {
-		return false, fmt.Errorf("check player exists: %w", err)
-	}
-	return count > 0, nil
-}
-
-func (r *DBPlayerRepository) playerLevels(ctx context.Context, uids []string) (map[string]int, error) {
-	levels := make(map[string]int, len(uids))
-	if len(uids) == 0 {
-		return levels, nil
-	}
-	var players []model.Player
-	if err := r.db.WithContext(ctx).Where("uid IN ?", uids).Find(&players).Error; err != nil {
-		return nil, fmt.Errorf("query player profiles: %w", err)
-	}
-	for _, player := range players {
-		levels[player.UID] = player.Level
-	}
-	return levels, nil
 }

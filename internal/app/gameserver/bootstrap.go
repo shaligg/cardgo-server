@@ -113,10 +113,17 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 			ilog.Errorf("close redis after bootstrap failure: %v", err)
 		}
 	}()
-	dbRepo := repo.NewDBPlayerRepository(gdb)
-	if err := dbRepo.Migrate(); err != nil {
+	if err := repo.Migrate(gdb); err != nil {
 		return nil, err
 	}
+	playerRepo := repo.NewDBPlayerRepository(gdb)
+	assetRepo := repo.NewDBAssetRepository(gdb)
+	cardRepo := repo.NewDBCardRepository(gdb)
+	levelProgressRepo := &repo.DBLevelProgressRepository{}
+	workshopRepo := repo.NewDBWorkshopRepository(gdb)
+	friendRepo := repo.NewDBFriendRepository(gdb)
+	guildRepo := repo.NewDBGuildRepository(gdb)
+	chatRepo := repo.NewDBChatRepository(gdb)
 	itemCatalog, err := gamedata.LoadItemCatalog(cfg.GameData.ItemConfigPath)
 	if err != nil {
 		return nil, err
@@ -133,16 +140,16 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 	if err != nil {
 		return nil, err
 	}
-	assetService := asset.Service{Items: itemCatalog, Players: dbRepo, Inventory: dbRepo, Tx: idb.NewTxManager(gdb), TxPlayers: dbRepo, TxInventory: dbRepo}
-	inventoryService := inventorygame.Service{Repo: dbRepo}
-	playerService := playergame.Service{Repo: dbRepo, Assets: assetService}
-	cardService := cardgame.Service{Repo: dbRepo, Assets: assetService, Tx: idb.NewTxManager(gdb), Data: gameData}
-	battleService := &battlegame.Service{Data: gameData, Assets: assetService, Tx: idb.NewTxManager(gdb), Progress: dbRepo}
-	workshopService := workshopgame.Service{Repo: dbRepo, Assets: assetService, Tx: idb.NewTxManager(gdb), Players: dbRepo, Data: workshopData}
+	assetService := asset.Service{Items: itemCatalog, PlayerRepo: assetRepo, InventoryRepo: assetRepo, Tx: idb.NewTxManager(gdb)}
+	inventoryService := inventorygame.Service{Repo: assetRepo}
+	playerService := playergame.Service{Repo: playerRepo, Assets: assetService}
+	cardService := cardgame.Service{Repo: cardRepo, Assets: assetService, Tx: idb.NewTxManager(gdb), Data: gameData}
+	battleService := &battlegame.Service{Data: gameData, Assets: assetService, Tx: idb.NewTxManager(gdb), Progress: levelProgressRepo}
+	workshopService := workshopgame.Service{Repo: workshopRepo, Assets: assetService, Tx: idb.NewTxManager(gdb), Players: playerRepo, Data: workshopData}
 	publicCore := globalcore.Core{
-		Friend: globalcore.LocalFriendService{Repo: dbRepo},
-		Guild:  globalcore.LocalGuildService{Repo: dbRepo},
-		Chat:   globalcore.LocalChatService{Messages: dbRepo, Membership: dbRepo},
+		Friend: globalcore.LocalFriendService{Repo: friendRepo},
+		Guild:  globalcore.LocalGuildService{Repo: guildRepo},
+		Chat:   globalcore.LocalChatService{Messages: chatRepo, Membership: guildRepo},
 	}
 	shardExec := dispatcher.NewShardExecutor(cfg.Server.DispatcherShards)
 	commandCache := session.NewCommandCache(time.Duration(cfg.State.OfflineTTLSec)*time.Second, 10, 16*1024)
@@ -214,7 +221,7 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 				ilog.Errorf("mark player owner offline failed uid=%s conn=%s err=%v", uid, connID, err)
 			}
 		},
-		OnRestoreState: buildRestoreStateCallback(dbRepo),
+		OnRestoreState: buildRestoreStateCallback(playerRepo),
 		Metrics:        metricsReg,
 	})
 	ownerReconciler := &playerOwnerReconciler{

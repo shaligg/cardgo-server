@@ -47,13 +47,10 @@ type ChangeResult struct {
 //
 // 它不直接访问数据库模型，而是依赖 repo 接口和道具配置完成路由、幂等和错误收敛。
 type Service struct {
-	Items     gamedata.ItemCatalog
-	Players   repo.PlayerRepository
-	Inventory repo.InventoryRepository
-	Tx        idb.TxManager
-	// TxPlayers 和 TxInventory 用于加入玩法 Service 开启的外部事务。
-	TxPlayers   repo.TxPlayerRepository
-	TxInventory repo.TxInventoryRepository
+	Items         gamedata.ItemCatalog
+	PlayerRepo    repo.PlayerAssetRepository
+	InventoryRepo repo.InventoryAssetRepository
+	Tx            idb.TxManager
 }
 
 // Grant 发放奖励资产。
@@ -262,10 +259,10 @@ func (s Service) changePlayerField(ctx context.Context, uid string, item gamedat
 	if item.StorageKey != "gold" {
 		return ChangeResult{}, fmt.Errorf("%w: unsupported player_field %q", ErrUnsupportedStorage, item.StorageKey)
 	}
-	if s.Players == nil {
+	if s.PlayerRepo == nil {
 		return ChangeResult{}, fmt.Errorf("player repository is nil")
 	}
-	p, err := s.Players.ChangeGold(ctx, uid, delta, item.ItemID, reason, reqID)
+	p, err := s.PlayerRepo.ChangeGold(ctx, uid, delta, item.ItemID, reason, reqID)
 	if err != nil {
 		return ChangeResult{}, err
 	}
@@ -274,10 +271,10 @@ func (s Service) changePlayerField(ctx context.Context, uid string, item gamedat
 
 // changeInventoryStack 处理通用可堆叠背包资产。
 func (s Service) changeInventoryStack(ctx context.Context, uid string, item gamedata.ItemConfig, delta int64, reason string, reqID string) (ChangeResult, error) {
-	if s.Inventory == nil {
+	if s.InventoryRepo == nil {
 		return ChangeResult{}, fmt.Errorf("inventory repository is nil")
 	}
-	invItem, err := s.Inventory.ChangeInventoryItem(ctx, uid, item.ItemID, delta, reason, reqID)
+	invItem, err := s.InventoryRepo.ChangeInventoryItem(ctx, uid, item.ItemID, delta, reason, reqID)
 	if err != nil {
 		return ChangeResult{}, err
 	}
@@ -288,16 +285,10 @@ func (s Service) changePlayerFieldInTx(ctx context.Context, tx *gorm.DB, uid str
 	if item.StorageKey != "gold" {
 		return ChangeResult{}, fmt.Errorf("%w: unsupported player_field %q", ErrUnsupportedStorage, item.StorageKey)
 	}
-	players := s.TxPlayers
-	if players == nil {
-		if p, ok := s.Players.(repo.TxPlayerRepository); ok {
-			players = p
-		}
-	}
-	if players == nil {
+	if s.PlayerRepo == nil {
 		return ChangeResult{}, fmt.Errorf("tx player repository is nil")
 	}
-	p, err := players.ChangeGoldInTx(ctx, tx, uid, delta, item.ItemID, reason, reqID)
+	p, err := s.PlayerRepo.ChangeGoldInTx(ctx, tx, uid, delta, item.ItemID, reason, reqID)
 	if err != nil {
 		return ChangeResult{}, err
 	}
@@ -305,16 +296,10 @@ func (s Service) changePlayerFieldInTx(ctx context.Context, tx *gorm.DB, uid str
 }
 
 func (s Service) changeInventoryStackInTx(ctx context.Context, tx *gorm.DB, uid string, item gamedata.ItemConfig, delta int64, reason string, reqID string) (ChangeResult, error) {
-	inventory := s.TxInventory
-	if inventory == nil {
-		if inv, ok := s.Inventory.(repo.TxInventoryRepository); ok {
-			inventory = inv
-		}
-	}
-	if inventory == nil {
+	if s.InventoryRepo == nil {
 		return ChangeResult{}, fmt.Errorf("tx inventory repository is nil")
 	}
-	invItem, err := inventory.ChangeInventoryItemInTx(ctx, tx, uid, item.ItemID, delta, reason, reqID)
+	invItem, err := s.InventoryRepo.ChangeInventoryItemInTx(ctx, tx, uid, item.ItemID, delta, reason, reqID)
 	if err != nil {
 		return ChangeResult{}, err
 	}

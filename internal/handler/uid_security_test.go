@@ -40,11 +40,11 @@ func TestPlayerHandlerIgnoresPayloadUIDForWrite(t *testing.T) {
 		t.Fatalf("NewCatalog: %v", err)
 	}
 	playerService := playergame.Service{
-		Repo: dbRepo,
+		Repo: dbRepo.DBPlayerRepository,
 		Assets: asset.Service{
-			Items:     items,
-			Players:   dbRepo,
-			Inventory: dbRepo,
+			Items:         items,
+			PlayerRepo:    dbRepo.DBAssetRepository,
+			InventoryRepo: dbRepo.DBAssetRepository,
 		},
 	}
 	handler := &BizHandler{PlayerService: playerService}
@@ -70,9 +70,17 @@ func TestPlayerHandlerIgnoresPayloadUIDForWrite(t *testing.T) {
 	}
 }
 
-func newUIDSecurityRepo(t *testing.T) (*repo.DBPlayerRepository, *gorm.DB) {
+type uidSecurityRepository struct {
+	*repo.DBPlayerRepository
+	*repo.DBAssetRepository
+}
+
+func newUIDSecurityRepo(t *testing.T) (*uidSecurityRepository, *gorm.DB) {
 	t.Helper()
 	db := testdb.OpenGame(t)
-	dbRepo := repo.NewDBPlayerRepository(db)
+	dbRepo := &uidSecurityRepository{
+		DBPlayerRepository: repo.NewDBPlayerRepository(db),
+		DBAssetRepository:  repo.NewDBAssetRepository(db),
+	}
 	return dbRepo, db
 }

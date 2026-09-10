@@ -15,10 +15,20 @@ import (
 	"gorm.io/gorm"
 )
 
-func newTestWorkshopService(t *testing.T) (Service, *repo.DBPlayerRepository, *gorm.DB) {
+type workshopTestRepository struct {
+	*repo.DBPlayerRepository
+	*repo.DBAssetRepository
+	*repo.DBWorkshopRepository
+}
+
+func newTestWorkshopService(t *testing.T) (Service, *workshopTestRepository, *gorm.DB) {
 	t.Helper()
 	db := testdb.OpenGame(t)
-	dbRepo := repo.NewDBPlayerRepository(db)
+	dbRepo := &workshopTestRepository{
+		DBPlayerRepository:   repo.NewDBPlayerRepository(db),
+		DBAssetRepository:    repo.NewDBAssetRepository(db),
+		DBWorkshopRepository: repo.NewDBWorkshopRepository(db),
+	}
 	items, err := gamedata.NewCatalog([]gamedata.ItemConfig{
 		{ItemID: gamedata.ItemIDGold, Key: "gold", StorageType: gamedata.StoragePlayerField, StorageKey: "gold", Stackable: true},
 		{ItemID: gamedata.ItemIDBasicMaterial, Key: "basic_material", StorageType: gamedata.StorageInventoryStack, Stackable: true},
@@ -41,8 +51,8 @@ func newTestWorkshopService(t *testing.T) (Service, *repo.DBPlayerRepository, *g
 	if err != nil {
 		t.Fatalf("NewWorkshopData: %v", err)
 	}
-	assets := asset.Service{Items: items, Players: dbRepo, Inventory: dbRepo, TxPlayers: dbRepo, TxInventory: dbRepo}
-	return Service{Repo: dbRepo, Assets: assets, Tx: idb.NewTxManager(db), Players: dbRepo, Data: workshopData}, dbRepo, db
+	assets := asset.Service{Items: items, PlayerRepo: dbRepo.DBAssetRepository, InventoryRepo: dbRepo.DBAssetRepository}
+	return Service{Repo: dbRepo.DBWorkshopRepository, Assets: assets, Tx: idb.NewTxManager(db), Players: dbRepo.DBPlayerRepository, Data: workshopData}, dbRepo, db
 }
 
 func TestGetOverviewCreatesDefaultWorkshop(t *testing.T) {

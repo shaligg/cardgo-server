@@ -381,6 +381,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 16. DONE：补齐 `internal/globalcore` 的 Friend/Mail/Notice 初始接口契约；Friend 后续已在“当前后续任务”第 16 项升级为完整基础闭环。
 17. DONE：删除旧 `WorldService` 公告口径，公告统一收敛到 `NoticeService`，避免公共领域核心出现两套命名。
 18. DONE：将原 `internal/game` 按职责拆为 `internal/domain` 与 `internal/gameplay`；只调整目录和依赖口径，不改变协议、业务逻辑或事务边界。
+19. DONE：按业务聚合拆分数据库实现：`DBPlayerRepository` 只保留玩家资料，资产、卡牌/卡组、关卡进度、工坊、好友、公会和聊天分别使用独立 Repository；数据库迁移改为包级 `repo.Migrate`，不保留旧万能仓储兼容入口。
 
 目标：
 

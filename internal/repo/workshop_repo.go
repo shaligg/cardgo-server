@@ -12,8 +12,18 @@ import (
 
 const defaultWorkshopThemeID = "default"
 
+// DBWorkshopRepository 是基于 GORM 的工坊仓储。
+type DBWorkshopRepository struct {
+	db *gorm.DB
+}
+
+// NewDBWorkshopRepository 创建工坊仓储。
+func NewDBWorkshopRepository(db *gorm.DB) *DBWorkshopRepository {
+	return &DBWorkshopRepository{db: db}
+}
+
 // GetOrCreateWorkshop 查询玩家工坊基础数据；不存在时创建默认工坊。
-func (r *DBPlayerRepository) GetOrCreateWorkshop(ctx context.Context, uid string) (PlayerWorkshop, error) {
+func (r *DBWorkshopRepository) GetOrCreateWorkshop(ctx context.Context, uid string) (PlayerWorkshop, error) {
 	var row model.PlayerWorkshop
 	err := r.db.WithContext(ctx).Where("uid = ?", uid).Take(&row).Error
 	if err == nil {
@@ -37,7 +47,7 @@ func (r *DBPlayerRepository) GetOrCreateWorkshop(ctx context.Context, uid string
 }
 
 // GetFacilities 查询玩家已有设施数据。
-func (r *DBPlayerRepository) GetFacilities(ctx context.Context, uid string) ([]PlayerFacility, error) {
+func (r *DBWorkshopRepository) GetFacilities(ctx context.Context, uid string) ([]PlayerFacility, error) {
 	var rows []model.PlayerFacility
 	if err := r.db.WithContext(ctx).Where("uid = ?", uid).Order("facility_id ASC").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("query player facilities: %w", err)
@@ -50,7 +60,7 @@ func (r *DBPlayerRepository) GetFacilities(ctx context.Context, uid string) ([]P
 }
 
 // GetFacilityInTx 在外部事务中查询玩家指定设施。
-func (r *DBPlayerRepository) GetFacilityInTx(ctx context.Context, tx *gorm.DB, uid string, facilityID string) (PlayerFacility, error) {
+func (r *DBWorkshopRepository) GetFacilityInTx(ctx context.Context, tx *gorm.DB, uid string, facilityID string) (PlayerFacility, error) {
 	if tx == nil {
 		return PlayerFacility{}, fmt.Errorf("transaction is nil")
 	}
@@ -66,7 +76,7 @@ func (r *DBPlayerRepository) GetFacilityInTx(ctx context.Context, tx *gorm.DB, u
 }
 
 // CreateFacilityInTx 创建业务层已经计算完成的设施数据。
-func (r *DBPlayerRepository) CreateFacilityInTx(ctx context.Context, tx *gorm.DB, facility PlayerFacility) error {
+func (r *DBWorkshopRepository) CreateFacilityInTx(ctx context.Context, tx *gorm.DB, facility PlayerFacility) error {
 	if tx == nil {
 		return fmt.Errorf("transaction is nil")
 	}
@@ -81,7 +91,7 @@ func (r *DBPlayerRepository) CreateFacilityInTx(ctx context.Context, tx *gorm.DB
 }
 
 // UpdateFacilityInTx 保存业务层已经计算完成的设施数据。
-func (r *DBPlayerRepository) UpdateFacilityInTx(ctx context.Context, tx *gorm.DB, facility PlayerFacility) error {
+func (r *DBWorkshopRepository) UpdateFacilityInTx(ctx context.Context, tx *gorm.DB, facility PlayerFacility) error {
 	if tx == nil {
 		return fmt.Errorf("transaction is nil")
 	}
@@ -124,7 +134,7 @@ func playerFacilityModel(facility PlayerFacility) (model.PlayerFacility, error) 
 }
 
 // RecordOfflineRewardClaim 记录离线收益领取结果，并在有可结算时推进结算时间。
-func (r *DBPlayerRepository) RecordOfflineRewardClaim(ctx context.Context, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error) {
+func (r *DBWorkshopRepository) RecordOfflineRewardClaim(ctx context.Context, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error) {
 	var out OfflineRewardClaim
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
@@ -138,7 +148,7 @@ func (r *DBPlayerRepository) RecordOfflineRewardClaim(ctx context.Context, uid s
 }
 
 // RecordOfflineRewardClaimInTx 在外部事务中记录离线收益领取结果。
-func (r *DBPlayerRepository) RecordOfflineRewardClaimInTx(ctx context.Context, tx *gorm.DB, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error) {
+func (r *DBWorkshopRepository) RecordOfflineRewardClaimInTx(ctx context.Context, tx *gorm.DB, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error) {
 	if tx == nil {
 		return OfflineRewardClaim{}, fmt.Errorf("transaction is nil")
 	}

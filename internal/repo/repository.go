@@ -1,6 +1,6 @@
 // Package repo 定义业务层依赖的持久化接口和领域数据结构。
 //
-// 具体实现负责事务、资产流水和缓存失效边界。
+// 具体实现负责事务、资产流水和数据库模型转换。
 package repo
 
 import (
@@ -154,29 +154,29 @@ type ChatRepository interface {
 	ListChatMessages(ctx context.Context, channelID string, beforeID uint64, limit int) ([]ChatMessageRecord, uint64, error)
 }
 
-// PlayerRepository 定义玩家基础数据的持久化能力。
-//
-// ChangeGold 必须在实现中保证资产变更和资产流水处于同一事务。
+// PlayerRepository 定义玩家基础资料的持久化能力。
 type PlayerRepository interface {
 	GetByUID(ctx context.Context, uid string) (Player, error)
-	ChangeGold(ctx context.Context, uid string, delta int64, itemID int64, reason string, reqID string) (Player, error)
 }
 
-// TxPlayerRepository 定义可加入外部事务的玩家资产写入能力。
-type TxPlayerRepository interface {
+// PlayerAssetRepository 定义玩家主表字段类资产的写入能力。
+//
+// ChangeGold 必须保证资产变更和资产流水处于同一事务。
+type PlayerAssetRepository interface {
+	ChangeGold(ctx context.Context, uid string, delta int64, itemID int64, reason string, reqID string) (Player, error)
 	ChangeGoldInTx(ctx context.Context, tx *gorm.DB, uid string, delta int64, itemID int64, reason string, reqID string) (Player, error)
 }
 
-// InventoryRepository 定义通用可堆叠背包的持久化能力。
-//
-// ChangeInventoryItem 必须在实现中保证扣费不为负，并让资产变更和流水处于同一事务。
+// InventoryRepository 定义通用可堆叠背包的查询能力。
 type InventoryRepository interface {
 	GetInventory(ctx context.Context, uid string) ([]InventoryItem, error)
-	ChangeInventoryItem(ctx context.Context, uid string, itemID int64, delta int64, reason string, reqID string) (InventoryItem, error)
 }
 
-// TxInventoryRepository 定义可加入外部事务的背包写入能力。
-type TxInventoryRepository interface {
+// InventoryAssetRepository 定义通用可堆叠背包资产的写入能力。
+//
+// ChangeInventoryItem 必须保证扣费不为负，并让资产变更和流水处于同一事务。
+type InventoryAssetRepository interface {
+	ChangeInventoryItem(ctx context.Context, uid string, itemID int64, delta int64, reason string, reqID string) (InventoryItem, error)
 	ChangeInventoryItemInTx(ctx context.Context, tx *gorm.DB, uid string, itemID int64, delta int64, reason string, reqID string) (InventoryItem, error)
 }
 

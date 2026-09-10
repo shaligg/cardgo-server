@@ -5,10 +5,21 @@ import (
 	"fmt"
 
 	"github.com/bigfish/go_orm_1/internal/repo/model"
+	"gorm.io/gorm"
 )
 
+// DBChatRepository 是基于 GORM 的聊天消息仓储。
+type DBChatRepository struct {
+	db *gorm.DB
+}
+
+// NewDBChatRepository 创建聊天消息仓储。
+func NewDBChatRepository(db *gorm.DB) *DBChatRepository {
+	return &DBChatRepository{db: db}
+}
+
 // CreateChatMessage 持久化一条聊天消息。
-func (r *DBPlayerRepository) CreateChatMessage(ctx context.Context, message ChatMessageRecord) (ChatMessageRecord, error) {
+func (r *DBChatRepository) CreateChatMessage(ctx context.Context, message ChatMessageRecord) (ChatMessageRecord, error) {
 	row := model.ChatMessage{
 		MsgID:     message.MsgID,
 		ChannelID: message.ChannelID,
@@ -23,7 +34,7 @@ func (r *DBPlayerRepository) CreateChatMessage(ctx context.Context, message Chat
 }
 
 // ListChatMessages 从最新消息向更早消息分页，单页结果按时间正序返回。
-func (r *DBPlayerRepository) ListChatMessages(ctx context.Context, channelID string, beforeID uint64, limit int) ([]ChatMessageRecord, uint64, error) {
+func (r *DBChatRepository) ListChatMessages(ctx context.Context, channelID string, beforeID uint64, limit int) ([]ChatMessageRecord, uint64, error) {
 	var rows []model.ChatMessage
 	query := r.db.WithContext(ctx).Where("channel_id = ?", channelID)
 	if beforeID > 0 {
