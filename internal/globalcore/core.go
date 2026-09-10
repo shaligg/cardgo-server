@@ -13,10 +13,10 @@ var (
 	ErrInvalidListLimit         = errors.New("invalid list limit")
 	ErrPlayerNotFound           = repo.ErrSocialPlayerNotFound
 	ErrCannotFriendSelf         = errors.New("cannot add self as friend")
-	ErrFriendRequestExists      = repo.ErrFriendRequestExists
-	ErrFriendRequestNotFound    = repo.ErrFriendRequestNotFound
-	ErrFriendRelationNotFound   = repo.ErrFriendRelationNotFound
-	ErrAlreadyFriends           = repo.ErrAlreadyFriends
+	ErrFriendRequestExists      = errors.New("friend request already exists")
+	ErrFriendRequestNotFound    = errors.New("friend request not found")
+	ErrFriendRelationNotFound   = errors.New("friend relation not found")
+	ErrAlreadyFriends           = errors.New("players are already friends")
 	ErrInvalidGuildName         = errors.New("guild name must contain 2-20 characters")
 	ErrGuildNameTaken           = repo.ErrGuildNameTaken
 	ErrGuildNotFound            = repo.ErrGuildNotFound
@@ -27,6 +27,11 @@ var (
 	ErrGuildApplicationNotFound = repo.ErrGuildApplicationNotFound
 	ErrInvalidChatChannel       = errors.New("invalid chat channel")
 	ErrInvalidChatContent       = errors.New("chat content must contain 1-200 characters")
+)
+
+const (
+	FriendStatusPending  = "pending"
+	FriendStatusAccepted = "accepted"
 )
 
 // Core 聚合当前 GameServer 可使用的公共领域核心接口。

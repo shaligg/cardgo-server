@@ -11,6 +11,8 @@ import (
 )
 
 // DBFriendRepository 是基于 GORM 的好友关系仓储。
+//
+// 本类型只负责好友关系的查询和持久化，申请方向与状态流转由 globalcore 处理。
 type DBFriendRepository struct {
 	db *gorm.DB
 }
@@ -20,87 +22,62 @@ func NewDBFriendRepository(db *gorm.DB) *DBFriendRepository {
 	return &DBFriendRepository{db: db}
 }
 
-// CreateFriendRequest 创建一条待审批好友关系。
-func (r *DBFriendRepository) CreateFriendRequest(ctx context.Context, uid string, targetUID string, reqID string) error {
-	exists, err := playerExists(ctx, r.db, targetUID)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return ErrSocialPlayerNotFound
-	}
+// WithTx 返回绑定到指定事务的好友仓储。
+func (r *DBFriendRepository) WithTx(tx *gorm.DB) *DBFriendRepository {
+	return &DBFriendRepository{db: tx}
+}
+
+// PlayerExists 查询目标玩家是否存在。
+func (r *DBFriendRepository) PlayerExists(ctx context.Context, uid string) (bool, error) {
+	return playerExists(ctx, r.db, uid)
+}
+
+// CreateFriendRelationData 尝试写入好友关系，并返回本次是否成功创建。
+func (r *DBFriendRepository) CreateFriendRelationData(ctx context.Context, uid string, targetUID string, requesterUID string, status string, reqID string) (bool, error) {
 	uidLow, uidHigh := orderedUIDPair(uid, targetUID)
 	row := model.FriendRelation{
 		UIDLow:       uidLow,
 		UIDHigh:      uidHigh,
-		RequesterUID: uid,
-		Status:       FriendStatusPending,
+		RequesterUID: requesterUID,
+		Status:       status,
 		ReqID:        reqID,
 	}
 	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
 	if result.Error != nil {
-		return fmt.Errorf("create friend request: %w", result.Error)
+		return false, fmt.Errorf("create friend relation: %w", result.Error)
 	}
-	if result.RowsAffected > 0 {
-		return nil
-	}
-
-	var existing model.FriendRelation
-	if err := r.db.WithContext(ctx).Where("uid_low = ? AND uid_high = ?", uidLow, uidHigh).Take(&existing).Error; err != nil {
-		return fmt.Errorf("query existing friend relation: %w", err)
-	}
-	if existing.Status == FriendStatusAccepted {
-		return ErrAlreadyFriends
-	}
-	return ErrFriendRequestExists
+	return result.RowsAffected > 0, nil
 }
 
-// ApproveFriendRequest 把目标玩家发起的申请转为好友关系。
-func (r *DBFriendRepository) ApproveFriendRequest(ctx context.Context, uid string, targetUID string, reqID string) error {
-	uidLow, uidHigh := orderedUIDPair(uid, targetUID)
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var row model.FriendRelation
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("uid_low = ? AND uid_high = ?", uidLow, uidHigh).
-			Take(&row).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrFriendRequestNotFound
-		}
-		if err != nil {
-			return fmt.Errorf("query friend request: %w", err)
-		}
-		if row.Status == FriendStatusAccepted {
-			return ErrAlreadyFriends
-		}
-		if row.RequesterUID != targetUID {
-			return ErrFriendRequestNotFound
-		}
-		return tx.Model(&row).Updates(map[string]interface{}{
-			"status": FriendStatusAccepted,
-			"req_id": reqID,
-		}).Error
-	})
+// FindFriendRelation 查询两个玩家之间的关系。
+func (r *DBFriendRepository) FindFriendRelation(ctx context.Context, uid string, targetUID string) (FriendRelationRecord, bool, error) {
+	return r.findFriendRelation(ctx, uid, targetUID, false)
 }
 
-// DeleteFriendRelation 删除好友关系或尚未处理的申请。
-func (r *DBFriendRepository) DeleteFriendRelation(ctx context.Context, uid string, targetUID string) error {
+// FindFriendRelationForUpdate 锁定并查询两个玩家之间的关系。
+func (r *DBFriendRepository) FindFriendRelationForUpdate(ctx context.Context, uid string, targetUID string) (FriendRelationRecord, bool, error) {
+	return r.findFriendRelation(ctx, uid, targetUID, true)
+}
+
+// UpdateFriendRelationData 更新好友关系状态和请求 ID。
+func (r *DBFriendRepository) UpdateFriendRelationData(ctx context.Context, uid string, targetUID string, status string, reqID string) error {
 	uidLow, uidHigh := orderedUIDPair(uid, targetUID)
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var row model.FriendRelation
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("uid_low = ? AND uid_high = ?", uidLow, uidHigh).
-			Take(&row).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrFriendRelationNotFound
-		}
-		if err != nil {
-			return fmt.Errorf("query friend relation: %w", err)
-		}
-		if err := tx.Delete(&row).Error; err != nil {
-			return fmt.Errorf("delete friend relation: %w", err)
-		}
-		return nil
-	})
+	if err := r.db.WithContext(ctx).Model(&model.FriendRelation{}).
+		Where("uid_low = ? AND uid_high = ?", uidLow, uidHigh).
+		Updates(map[string]interface{}{"status": status, "req_id": reqID}).Error; err != nil {
+		return fmt.Errorf("update friend relation: %w", err)
+	}
+	return nil
+}
+
+// DeleteFriendRelationData 删除好友关系，并返回是否存在可删除记录。
+func (r *DBFriendRepository) DeleteFriendRelationData(ctx context.Context, uid string, targetUID string) (bool, error) {
+	uidLow, uidHigh := orderedUIDPair(uid, targetUID)
+	result := r.db.WithContext(ctx).Where("uid_low = ? AND uid_high = ?", uidLow, uidHigh).Delete(&model.FriendRelation{})
+	if result.Error != nil {
+		return false, fmt.Errorf("delete friend relation: %w", result.Error)
+	}
+	return result.RowsAffected > 0, nil
 }
 
 // ListFriendRelations 按关系 ID 正向分页查询好友和待处理申请。
@@ -149,6 +126,23 @@ func (r *DBFriendRepository) ListFriendRelations(ctx context.Context, uid string
 		})
 	}
 	return result, nextCursor, nil
+}
+
+func (r *DBFriendRepository) findFriendRelation(ctx context.Context, uid string, targetUID string, forUpdate bool) (FriendRelationRecord, bool, error) {
+	uidLow, uidHigh := orderedUIDPair(uid, targetUID)
+	query := r.db.WithContext(ctx)
+	if forUpdate {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	var row model.FriendRelation
+	err := query.Where("uid_low = ? AND uid_high = ?", uidLow, uidHigh).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return FriendRelationRecord{}, false, nil
+	}
+	if err != nil {
+		return FriendRelationRecord{}, false, fmt.Errorf("query friend relation: %w", err)
+	}
+	return FriendRelationRecord{RequesterUID: row.RequesterUID, Status: row.Status}, true, nil
 }
 
 func orderedUIDPair(uid string, targetUID string) (string, string) {

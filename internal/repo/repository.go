@@ -61,13 +61,9 @@ var ErrPlayerFacilityNotFound = errors.New("player facility not found")
 // ErrLevelProgressNotFound 表示玩家还没有目标关卡的进度记录。
 var ErrLevelProgressNotFound = errors.New("level progress not found")
 
-// 公共社交域的状态错误由仓储返回，LocalService 和未来 RemoteClient 共用同一语义。
+// 社交仓储查询和数据库约束转换使用的错误。
 var (
 	ErrSocialPlayerNotFound     = errors.New("player not found")
-	ErrFriendRequestExists      = errors.New("friend request already exists")
-	ErrFriendRequestNotFound    = errors.New("friend request not found")
-	ErrFriendRelationNotFound   = errors.New("friend relation not found")
-	ErrAlreadyFriends           = errors.New("players are already friends")
 	ErrGuildNameTaken           = errors.New("guild name already exists")
 	ErrGuildNotFound            = errors.New("guild not found")
 	ErrAlreadyInGuild           = errors.New("player already belongs to a guild")
@@ -78,10 +74,8 @@ var (
 )
 
 const (
-	FriendStatusPending  = "pending"
-	FriendStatusAccepted = "accepted"
-	GuildRoleLeader      = "leader"
-	GuildRoleMember      = "member"
+	GuildRoleLeader = "leader"
+	GuildRoleMember = "member"
 )
 
 // FriendRecord 是好友仓储返回的一条关系记录。
@@ -94,12 +88,10 @@ type FriendRecord struct {
 	Status       string
 }
 
-// FriendRepository 定义好友关系持久化能力。
-type FriendRepository interface {
-	CreateFriendRequest(ctx context.Context, uid string, targetUID string, reqID string) error
-	ApproveFriendRequest(ctx context.Context, uid string, targetUID string, reqID string) error
-	DeleteFriendRelation(ctx context.Context, uid string, targetUID string) error
-	ListFriendRelations(ctx context.Context, uid string, afterID uint64, limit int) ([]FriendRecord, uint64, error)
+// FriendRelationRecord 是好友状态流转读取的关系记录。
+type FriendRelationRecord struct {
+	RequesterUID string
+	Status       string
 }
 
 // GuildMemberRecord 是公会成员仓储 DTO。

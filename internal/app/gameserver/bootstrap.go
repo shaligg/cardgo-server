@@ -147,7 +147,7 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 	battleService := &battlegame.Service{Data: gameData, Assets: assetService, Tx: idb.NewTxManager(gdb), Progress: levelProgressRepo}
 	workshopService := workshopgame.Service{Repo: workshopRepo, Assets: assetService, Tx: idb.NewTxManager(gdb), Players: playerRepo, Data: workshopData}
 	publicCore := globalcore.Core{
-		Friend: globalcore.LocalFriendService{Repo: friendRepo},
+		Friend: globalcore.LocalFriendService{Repo: friendRepo, Tx: idb.NewTxManager(gdb)},
 		Guild:  globalcore.LocalGuildService{Repo: guildRepo, Tx: idb.NewTxManager(gdb)},
 		Chat:   globalcore.LocalChatService{Messages: chatRepo, Membership: guildRepo},
 	}

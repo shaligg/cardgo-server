@@ -12,11 +12,17 @@ import (
 
 func TestLocalFriendServiceLifecycle(t *testing.T) {
 	dbRepo := newSocialRepository(t, "friend_a", "friend_b")
-	service := LocalFriendService{Repo: dbRepo}
+	service := LocalFriendService{Repo: dbRepo.DBFriendRepository, Tx: dbRepo.Tx}
 	ctx := context.Background()
 
 	if err := service.Apply(ctx, "friend_a", "friend_b", "friend-apply"); err != nil {
 		t.Fatalf("Apply: %v", err)
+	}
+	if err := service.Apply(ctx, "friend_a", "friend_b", "friend-apply-again"); !errors.Is(err, ErrFriendRequestExists) {
+		t.Fatalf("duplicate Apply error = %v, want %v", err, ErrFriendRequestExists)
+	}
+	if err := service.Approve(ctx, "friend_a", "friend_b", "friend-approve-wrong-side"); !errors.Is(err, ErrFriendRequestNotFound) {
+		t.Fatalf("reverse Approve error = %v, want %v", err, ErrFriendRequestNotFound)
 	}
 	assertFriendStatus(t, service, "friend_a", "friend_b", "outgoing")
 	assertFriendStatus(t, service, "friend_b", "friend_a", "incoming")
@@ -24,8 +30,11 @@ func TestLocalFriendServiceLifecycle(t *testing.T) {
 	if err := service.Approve(ctx, "friend_b", "friend_a", "friend-approve"); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
-	assertFriendStatus(t, service, "friend_a", "friend_b", repo.FriendStatusAccepted)
-	assertFriendStatus(t, service, "friend_b", "friend_a", repo.FriendStatusAccepted)
+	if err := service.Approve(ctx, "friend_a", "friend_b", "friend-approve-again"); !errors.Is(err, ErrAlreadyFriends) {
+		t.Fatalf("duplicate Approve error = %v, want %v", err, ErrAlreadyFriends)
+	}
+	assertFriendStatus(t, service, "friend_a", "friend_b", FriendStatusAccepted)
+	assertFriendStatus(t, service, "friend_b", "friend_a", FriendStatusAccepted)
 
 	if err := service.Remove(ctx, "friend_a", "friend_b", "friend-remove"); err != nil {
 		t.Fatalf("Remove: %v", err)
@@ -41,7 +50,7 @@ func TestLocalFriendServiceLifecycle(t *testing.T) {
 
 func TestLocalFriendServiceRejectsInvalidRelation(t *testing.T) {
 	dbRepo := newSocialRepository(t, "friend_owner")
-	service := LocalFriendService{Repo: dbRepo}
+	service := LocalFriendService{Repo: dbRepo.DBFriendRepository, Tx: dbRepo.Tx}
 	ctx := context.Background()
 
 	if err := service.Apply(ctx, "friend_owner", "friend_owner", "friend-self"); !errors.Is(err, ErrCannotFriendSelf) {
@@ -54,7 +63,7 @@ func TestLocalFriendServiceRejectsInvalidRelation(t *testing.T) {
 
 func TestLocalGuildAndChatLifecycle(t *testing.T) {
 	dbRepo := newSocialRepository(t, "guild_owner", "guild_member", "guild_outsider")
-	guilds := LocalGuildService{Repo: dbRepo.DBGuildRepository, Tx: dbRepo.GuildTx}
+	guilds := LocalGuildService{Repo: dbRepo.DBGuildRepository, Tx: dbRepo.Tx}
 	chat := LocalChatService{Messages: dbRepo, Membership: dbRepo}
 	ctx := context.Background()
 
@@ -160,7 +169,7 @@ type socialTestRepository struct {
 	*repo.DBFriendRepository
 	*repo.DBGuildRepository
 	*repo.DBChatRepository
-	GuildTx idb.TxManager
+	Tx idb.TxManager
 }
 
 func newSocialRepository(t *testing.T, uids ...string) *socialTestRepository {
@@ -171,7 +180,7 @@ func newSocialRepository(t *testing.T, uids ...string) *socialTestRepository {
 		DBFriendRepository: repo.NewDBFriendRepository(db),
 		DBGuildRepository:  repo.NewDBGuildRepository(db),
 		DBChatRepository:   repo.NewDBChatRepository(db),
-		GuildTx:            idb.NewTxManager(db),
+		Tx:                 idb.NewTxManager(db),
 	}
 	for _, uid := range uids {
 		if _, err := dbRepo.DBPlayerRepository.CreateIfAbsent(context.Background(), repo.Player{

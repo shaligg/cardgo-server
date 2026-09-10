@@ -2,9 +2,12 @@ package globalcore
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
+	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/repo"
+	"gorm.io/gorm"
 )
 
 // FriendItem 是好友列表返回的轻量 DTO。
@@ -18,9 +21,10 @@ type FriendItem struct {
 
 // LocalFriendService 是好友领域的同进程实现。
 //
-// 它只依赖持久化接口，未来 GameServer 可把 FriendService 替换为 RemoteClient。
+// 它负责好友规则与事务编排，未来 GameServer 可把 FriendService 替换为 RemoteClient。
 type LocalFriendService struct {
-	Repo repo.FriendRepository
+	Repo *repo.DBFriendRepository
+	Tx   idb.TxManager
 }
 
 // Apply 创建一条好友申请。
@@ -36,7 +40,31 @@ func (s LocalFriendService) Apply(ctx context.Context, uid string, targetUID str
 	if uid == targetUID {
 		return ErrCannotFriendSelf
 	}
-	return s.Repo.CreateFriendRequest(ctx, uid, targetUID, reqID)
+	if s.Repo == nil {
+		return fmt.Errorf("friend repository is nil")
+	}
+	exists, err := s.Repo.PlayerExists(ctx, targetUID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrPlayerNotFound
+	}
+	created, err := s.Repo.CreateFriendRelationData(ctx, uid, targetUID, uid, FriendStatusPending, reqID)
+	if err != nil {
+		return err
+	}
+	if created {
+		return nil
+	}
+	relation, found, err := s.Repo.FindFriendRelation(ctx, uid, targetUID)
+	if err != nil {
+		return err
+	}
+	if found && relation.Status == FriendStatusAccepted {
+		return ErrAlreadyFriends
+	}
+	return ErrFriendRequestExists
 }
 
 // Approve 同意 targetUID 发来的好友申请。
@@ -49,7 +77,22 @@ func (s LocalFriendService) Approve(ctx context.Context, uid string, targetUID s
 	if uid == "" || targetUID == "" || uid == targetUID {
 		return ErrFriendRequestNotFound
 	}
-	return s.Repo.ApproveFriendRequest(ctx, uid, targetUID, reqID)
+	return s.withTransaction(ctx, func(store *repo.DBFriendRepository) error {
+		relation, found, err := store.FindFriendRelationForUpdate(ctx, uid, targetUID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return ErrFriendRequestNotFound
+		}
+		if relation.Status == FriendStatusAccepted {
+			return ErrAlreadyFriends
+		}
+		if relation.RequesterUID != targetUID {
+			return ErrFriendRequestNotFound
+		}
+		return store.UpdateFriendRelationData(ctx, uid, targetUID, FriendStatusAccepted, reqID)
+	})
 }
 
 // Remove 删除好友关系或待处理申请。
@@ -62,7 +105,17 @@ func (s LocalFriendService) Remove(ctx context.Context, uid string, targetUID st
 	if uid == "" || targetUID == "" || uid == targetUID {
 		return ErrFriendRelationNotFound
 	}
-	return s.Repo.DeleteFriendRelation(ctx, uid, targetUID)
+	if s.Repo == nil {
+		return fmt.Errorf("friend repository is nil")
+	}
+	deleted, err := s.Repo.DeleteFriendRelationData(ctx, uid, targetUID)
+	if err != nil {
+		return err
+	}
+	if !deleted {
+		return ErrFriendRelationNotFound
+	}
+	return nil
 }
 
 // List 分页返回好友和申请状态。
@@ -71,6 +124,9 @@ func (s LocalFriendService) List(ctx context.Context, uid string, cursor string,
 	if err != nil {
 		return nil, "", err
 	}
+	if s.Repo == nil {
+		return nil, "", fmt.Errorf("friend repository is nil")
+	}
 	rows, nextCursor, err := s.Repo.ListFriendRelations(ctx, uid, afterID, pageSize)
 	if err != nil {
 		return nil, "", err
@@ -78,7 +134,7 @@ func (s LocalFriendService) List(ctx context.Context, uid string, cursor string,
 	items := make([]FriendItem, 0, len(rows))
 	for _, row := range rows {
 		status := row.Status
-		if row.Status == repo.FriendStatusPending {
+		if row.Status == FriendStatusPending {
 			status = "incoming"
 			if row.RequesterUID == uid {
 				status = "outgoing"
@@ -93,6 +149,16 @@ func (s LocalFriendService) List(ctx context.Context, uid string, cursor string,
 		})
 	}
 	return items, formatCursor(nextCursor), nil
+}
+
+// withTransaction 为一次好友状态流转提供统一事务边界。
+func (s LocalFriendService) withTransaction(ctx context.Context, fn func(*repo.DBFriendRepository) error) error {
+	if s.Repo == nil {
+		return fmt.Errorf("friend repository is nil")
+	}
+	return s.Tx.Do(ctx, func(tx *gorm.DB) error {
+		return fn(s.Repo.WithTx(tx))
+	})
 }
 
 // FriendService 定义好友公共领域能力。

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/bigfish/go_orm_1/internal/globalcore"
+	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/repo"
 	"github.com/bigfish/go_orm_1/internal/testutil/testdb"
 )
@@ -20,7 +21,7 @@ func TestFriendHandlerUsesAuthenticatedUID(t *testing.T) {
 			t.Fatalf("create player %s: %v", uid, err)
 		}
 	}
-	friendService := globalcore.LocalFriendService{Repo: friendRepo}
+	friendService := globalcore.LocalFriendService{Repo: friendRepo, Tx: idb.NewTxManager(db)}
 	h := &BizHandler{FriendService: friendService}
 
 	_, bizErr := h.FriendApply(context.Background(), "auth_uid", []byte(`{"uid":"evil_uid","target_uid":"target_uid","req_id":"friend-handler"}`))

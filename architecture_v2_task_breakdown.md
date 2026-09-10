@@ -262,6 +262,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 21. DONE：补齐玩家资料闭环：`players` 增加昵称、头像和时间字段；查询不再隐式建号；验票后先显式幂等初始化玩家，再绑定会话和 Redis 归属；好友列表与公会申请读取真实玩家资料。
 22. DONE：将公会权限、成员状态、会长转让和解散规则从 `DBGuildRepository` 上移到 `globalcore.LocalGuildService`；Repository 仅保留事务内锁行、查询、CRUD 和约束冲突转换。
 23. TODO（上线前）：完成正式账号域。自有 LoginService 建立 `accounts` 账号主表和 `account_identities` 登录身份映射，以内部稳定 UID 关联 `players`；支持游客或平台身份、账号状态、第三方凭证校验，以及 `account_token/refresh_token` 的签发、续期和失效。正式接口不得再把客户端提交的 `account` 直接当作 UID。若上线时接入的外部账号平台已完整提供稳定 UID、身份绑定和 Token 撤销能力，则本地以账号适配器替代，不重复建设账号表。
+24. DONE：将好友申请方向、重复关系和状态流转规则从 `DBFriendRepository` 上移到 `globalcore.LocalFriendService`；Repository 仅保留查询、锁行和 CRUD，审批事务由 Service 统一管理。
 
 ## 8. 卡牌 MVP 后续任务拆分
 
