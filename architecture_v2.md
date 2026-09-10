@@ -229,7 +229,8 @@ Gateway / Transport
 - `Gateway` 处理连接、协议、心跳、限流、背压。
 - `Handler` 只做协议参数解析和调用 Service。
 - `Service` 承载业务规则。
-- `Repository` 只做数据库访问。
+- `Repository` 只做数据库访问，按业务聚合或事务边界组织，不按数据库表机械拆分。
+- `Store` 专指进程内存或 Redis 运行状态；需要持久化数据时由 Store 调用 Repository，Repository 不感知 Store。
 - `Model` 是持久化模型，不直接暴露给客户端。
 
 ## 8. 数据分层

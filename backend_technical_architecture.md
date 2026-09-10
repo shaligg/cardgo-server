@@ -229,7 +229,7 @@ Client -> AccessGateway ==少量内网复用连接==> GameServer
 ### 5.5 game（业务模块）
 - 承载 MVP 主链路业务模块
 - 子域：`player`、`asset`、`inventory`、`card`、`deck`、`order`、`battle`、`workshop`
-- 只依赖服务接口与仓储接口
+- 通过领域 `Repository` 访问持久化数据；只有存在多实现、跨模块复用或测试替换需求时才抽接口
 - 不直接触碰 Redis/SQL 细节
 - 不承载好友、聊天、公会、邮件、排行榜等跨玩家公共域完整逻辑
 
@@ -539,13 +539,20 @@ MVP:
 - Redis 查询失败时保留本机运行态，等待下一周期重试
 
 ### 5.7 repository
-- 纯数据库 CRUD、事务、批量写
-- 不包含缓存逻辑
+- `Repository` 是 MySQL 持久化访问层，负责 GORM 查询、事务内 CRUD、批量写、唯一键冲突和数据库模型转换。
+- `Repository` 按业务聚合或事务边界组织，不按数据库表机械拆分。一个 `CardRepository` 可以同时访问卡牌和卡组表，一个 `AssetRepository` 可以同时访问玩家基础货币、背包和资产流水表。
+- GORM 已经提供通用 CRUD，不再额外实现按表名、字段名动态访问的万能 `GenericRepository`。
+- 普通本地模块只有一个数据库实现时可以依赖具体 Repository；存在内存/数据库多实现、Local/Remote 替换或单元测试隔离需求时，再由调用方依赖窄接口。
+- `Repository` 只处理持久化语义，不计算玩法奖励、不判断公会权限、不编排发奖，也不生成面向客户端的响应。
+- `Repository` 不包含进程内缓存、Redis 缓存或在线玩家生命周期逻辑，不能感知玩家是否在线。
+- 数据库具体实现统一使用 `DB<Domain>Repository` 命名，例如 `DBPlayerRepository`、`DBAssetRepository`、`DBCardRepository`；禁止让一个 Repository 实现无关业务域的全部方法。
 
 ### 5.8 模块专用内存结构
 - 当前不提供通用 L1/L2 业务读缓存，也不设置 `CachedRepository` 中间层。
 - 在线玩家聚合、排行榜 TopN、匹配池等确有热点时，由对应模块实现有界的专用 Store、Snapshot 或 Index。
 - 专用内存结构必须明确权威来源、容量、生命周期和重建方式，不能作为无上限通用 `map` 使用。
+- `Store` 统一表示进程内存或 Redis 中的运行状态，不用来命名 MySQL Repository；例如 `OnlinePlayerStore`、`BattleSessionStore`、`PlayerOwnerStore`。
+- `Store` 需要持久化数据时可以调用 Repository 加载或写入；Repository 不反向依赖 Store。
 
 ### 5.9 infra
 - 配置、日志、监控、告警
@@ -555,7 +562,6 @@ MVP:
 - `LoginPort`：登录请求入口（当前为进程内 HTTP handler）
 - `RealtimePort`：WS 接入入口
 - `StatePort`：本机状态恢复与清理入口
-- `RepoPort`：数据访问入口
 - 要求：只有明确可能外部化的边界才强制 `interface + local adapter`
 - 说明：普通本地业务模块不为了形式统一而强制增加 adapter
 - 演进：未来拆分时在边界外增加 `rpc/http/mq adapter`，不改变业务接口语义
@@ -664,9 +670,11 @@ MVP 固定使用 HMAC-SHA256：
 
 ### 7.2 读流程
 1. `Service -> Repository.GetX`
-2. `Repository` 查询 DB 并返回业务 DTO。
-3. 未来实现 `OnlinePlayerStore` 后，当前归属玩家已加载模块优先读运行态；不在线对象仍按需查询 DB。
-4. 排行榜等公共热点由所属模块直接使用 Redis，并在监控确认瓶颈后增加专用短期快照。
+2. `Repository` 使用 GORM/Model 查询 DB，并返回业务所需的数据结构。
+3. Repository 可以是具体实现或窄接口，但不能为了单次简单查询机械增加一套接口与适配器。
+4. 未来实现 `OnlinePlayerStore` 后，Service 对允许在线驻留的数据先读取 Store；模块未加载时由 Store 的 Loader 调用对应 Repository，加载成功后放入当前玩家聚合。
+5. Repository 不读取或更新 `OnlinePlayerStore`，不在线对象仍由业务模块按需查询 DB。
+6. 排行榜等公共热点由所属模块直接使用 Redis，并在监控确认瓶颈后增加专用短期快照。
 
 ### 7.3 写流程
 1. `Service` 完成业务判断，决定本次消耗、奖励和玩法状态变更。
@@ -674,6 +682,13 @@ MVP 固定使用 HMAC-SHA256：
 3. 事务内由 `Service` 编排 `Cost/Reward` 写入器与领域 `Repository`；`Repository` 只负责表读写，不反向编排发奖或跨玩法业务。
 4. 事务提交成功后返回最新业务结果。
 5. 返回客户端。
+
+在线资产写入约束：
+
+- 一个 UID 同时只允许归属一个 GameServer，同一 UID 的普通业务请求由 Dispatcher 串行执行。
+- 在线玩家资产必须由归属 GameServer 写入；GlobalServer、GM 和其他节点不能绕过归属节点并发修改在线玩家资产。
+- GlobalServer 的奖励通过邮件、待领取记录或明确的交付任务进入玩家主链路，不直接并发更新在线玩家余额。
+- 数据库事务用于保证资产、玩法状态和流水共同提交，不额外为不存在的跨节点并发增加行锁。
 
 ### 7.4 断线流程
 1. 连接断开
@@ -753,7 +768,7 @@ MVP: session_id == 当前连接 ID
 
 ### 7.6 未来优化：在线玩家聚合（DEFERRED）
 
-该优化不属于当前 Demo。只有监控确认在线玩家的重复 DB 查询已经成为实际瓶颈，并且玩家模块边界基本稳定后才启动。
+项目已进入 Demo 后的线上化优化阶段；`OnlinePlayerStore` 仍只在监控确认重复 DB 查询成为实际瓶颈，并且玩家模块边界基本稳定后启动。
 
 目标不是把 GORM Model 或数据库 Session 直接放进缓存，而是建立独立领域对象：
 
@@ -796,6 +811,7 @@ OnlinePlayerStore
 2. 背包、卡牌、工坊等较大模块按首次访问懒加载；加载后在玩家在线期间直接读内存，不重复查询 DB。
 3. 同节点短时重连复用该聚合；跨节点、进程重启或内存失效时重新从正式业务表加载。
 4. 玩家离线超过 TTL 后释放整个聚合；再次登录时从正式业务表加载。
+5. 每个模块 Loader 通过对应领域 Repository 加载数据；没有独立 Repository 的单表不能通过万能表接口读取，应归入现有业务聚合或增加模块内具体 Repository 方法。
 
 关键写规则：
 
