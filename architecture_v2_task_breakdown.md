@@ -260,6 +260,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 19. 不新增无调用方的架构预留模块；按以上顺序一次修复一个现有问题。
 20. DEFERRED：监控确认重复 DB 读取成为瓶颈后，再按技术架构 7.6 节实现 `OnlinePlayerStore`；实施前必须先完成跨节点单写者 fencing，当前 Demo 不提前增加该调用链。
 21. DONE：补齐玩家资料闭环：`players` 增加昵称、头像和时间字段；查询不再隐式建号；验票后先显式幂等初始化玩家，再绑定会话和 Redis 归属；好友列表与公会申请读取真实玩家资料。
+22. DONE：将公会权限、成员状态、会长转让和解散规则从 `DBGuildRepository` 上移到 `globalcore.LocalGuildService`；Repository 仅保留事务内锁行、查询、CRUD 和约束冲突转换。
 
 ## 8. 卡牌 MVP 后续任务拆分
 

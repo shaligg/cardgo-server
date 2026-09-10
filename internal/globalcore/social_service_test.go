@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/repo"
 	"github.com/bigfish/go_orm_1/internal/testutil/testdb"
 )
@@ -53,7 +54,7 @@ func TestLocalFriendServiceRejectsInvalidRelation(t *testing.T) {
 
 func TestLocalGuildAndChatLifecycle(t *testing.T) {
 	dbRepo := newSocialRepository(t, "guild_owner", "guild_member", "guild_outsider")
-	guilds := LocalGuildService{Repo: dbRepo}
+	guilds := LocalGuildService{Repo: dbRepo.DBGuildRepository, Tx: dbRepo.GuildTx}
 	chat := LocalChatService{Messages: dbRepo, Membership: dbRepo}
 	ctx := context.Background()
 
@@ -159,6 +160,7 @@ type socialTestRepository struct {
 	*repo.DBFriendRepository
 	*repo.DBGuildRepository
 	*repo.DBChatRepository
+	GuildTx idb.TxManager
 }
 
 func newSocialRepository(t *testing.T, uids ...string) *socialTestRepository {
@@ -169,6 +171,7 @@ func newSocialRepository(t *testing.T, uids ...string) *socialTestRepository {
 		DBFriendRepository: repo.NewDBFriendRepository(db),
 		DBGuildRepository:  repo.NewDBGuildRepository(db),
 		DBChatRepository:   repo.NewDBChatRepository(db),
+		GuildTx:            idb.NewTxManager(db),
 	}
 	for _, uid := range uids {
 		if _, err := dbRepo.DBPlayerRepository.CreateIfAbsent(context.Background(), repo.Player{

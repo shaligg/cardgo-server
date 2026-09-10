@@ -2,11 +2,17 @@ package globalcore
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
+	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/repo"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // GuildMember 是公会成员列表 DTO。
@@ -51,7 +57,8 @@ type GuildService interface {
 
 // LocalGuildService 是公会领域的同进程实现。
 type LocalGuildService struct {
-	Repo repo.GuildRepository
+	Repo *repo.DBGuildRepository
+	Tx   idb.TxManager
 }
 
 // Create 创建公会并把当前玩家设为会长。
@@ -63,15 +70,33 @@ func (s LocalGuildService) Create(ctx context.Context, uid string, name string, 
 	if utf8.RuneCountInString(name) < 2 || utf8.RuneCountInString(name) > 20 {
 		return GuildInfo{}, ErrInvalidGuildName
 	}
-	record, err := s.Repo.CreateGuild(ctx, uid, uuid.NewString(), name, reqID)
+	guildID := uuid.NewString()
+	err := s.withTransaction(ctx, func(store *repo.DBGuildRepository) error {
+		if err := store.LockPlayer(ctx, uid); err != nil {
+			return err
+		}
+		if _, err := store.GetMembership(ctx, uid); err == nil {
+			return ErrAlreadyInGuild
+		} else if !errors.Is(err, repo.ErrNotGuildMember) {
+			return err
+		}
+		return store.CreateGuildData(ctx, repo.GuildRecord{
+			GuildID: guildID, Name: name, OwnerUID: uid,
+		}, repo.GuildMemberRecord{
+			GuildID: guildID, UID: uid, Role: repo.GuildRoleLeader, JoinedAt: time.Now().UTC().Unix(),
+		}, reqID)
+	})
 	if err != nil {
 		return GuildInfo{}, err
 	}
-	return toGuildInfo(record), nil
+	return s.Get(ctx, uid, guildID)
 }
 
 // Search 按名称分页搜索公会。
 func (s LocalGuildService) Search(ctx context.Context, uid string, keyword string, cursor string, limit int) ([]GuildInfo, string, error) {
+	if s.Repo == nil {
+		return nil, "", fmt.Errorf("guild repository is nil")
+	}
 	afterID, pageSize, err := parsePage(cursor, limit)
 	if err != nil {
 		return nil, "", err
@@ -89,7 +114,18 @@ func (s LocalGuildService) Search(ctx context.Context, uid string, keyword strin
 
 // Get 查询指定公会；guildID 为空时查询当前玩家所属公会。
 func (s LocalGuildService) Get(ctx context.Context, uid string, guildID string) (GuildInfo, error) {
-	record, err := s.Repo.GetGuild(ctx, uid, strings.TrimSpace(guildID))
+	if s.Repo == nil {
+		return GuildInfo{}, fmt.Errorf("guild repository is nil")
+	}
+	guildID = strings.TrimSpace(guildID)
+	if guildID == "" {
+		membership, err := s.Repo.GetMembership(ctx, uid)
+		if err != nil {
+			return GuildInfo{}, err
+		}
+		guildID = membership.GuildID
+	}
+	record, err := s.Repo.GetGuild(ctx, uid, guildID)
 	if err != nil {
 		return GuildInfo{}, err
 	}
@@ -106,7 +142,17 @@ func (s LocalGuildService) ListApplications(ctx context.Context, operatorUID str
 	if guildID == "" {
 		return nil, "", ErrGuildNotFound
 	}
-	rows, nextCursor, err := s.Repo.ListGuildApplications(ctx, operatorUID, guildID, afterID, pageSize)
+	if s.Repo == nil {
+		return nil, "", fmt.Errorf("guild repository is nil")
+	}
+	operator, err := s.Repo.GetMembership(ctx, operatorUID)
+	if err != nil || operator.GuildID != guildID || operator.Role != repo.GuildRoleLeader {
+		if err != nil && !errors.Is(err, repo.ErrNotGuildMember) {
+			return nil, "", err
+		}
+		return nil, "", ErrGuildPermissionDenied
+	}
+	rows, nextCursor, err := s.Repo.ListGuildApplications(ctx, guildID, afterID, pageSize)
 	if err != nil {
 		return nil, "", err
 	}
@@ -132,7 +178,20 @@ func (s LocalGuildService) ApplyJoin(ctx context.Context, uid string, guildID st
 	if guildID == "" {
 		return ErrGuildNotFound
 	}
-	return s.Repo.CreateGuildApplication(ctx, uid, guildID, reqID)
+	return s.withTransaction(ctx, func(store *repo.DBGuildRepository) error {
+		if err := store.LockPlayer(ctx, uid); err != nil {
+			return err
+		}
+		if err := store.LockGuild(ctx, guildID); err != nil {
+			return err
+		}
+		if _, err := store.GetMembership(ctx, uid); err == nil {
+			return ErrAlreadyInGuild
+		} else if !errors.Is(err, repo.ErrNotGuildMember) {
+			return err
+		}
+		return store.CreateGuildApplicationData(ctx, guildID, uid, reqID)
+	})
 }
 
 // ApproveJoin 由会长审批目标玩家的入会申请。
@@ -145,7 +204,32 @@ func (s LocalGuildService) ApproveJoin(ctx context.Context, operatorUID string, 
 	if guildID == "" || targetUID == "" || operatorUID == targetUID {
 		return ErrGuildApplicationNotFound
 	}
-	return s.Repo.ApproveGuildApplication(ctx, operatorUID, guildID, targetUID, reqID)
+	return s.withTransaction(ctx, func(store *repo.DBGuildRepository) error {
+		if err := lockGuildPlayers(ctx, store, operatorUID, targetUID); err != nil {
+			return err
+		}
+		if err := store.LockGuild(ctx, guildID); err != nil {
+			return err
+		}
+		operator, err := store.GetMembership(ctx, operatorUID)
+		if err != nil || operator.GuildID != guildID || operator.Role != repo.GuildRoleLeader {
+			if err != nil && !errors.Is(err, repo.ErrNotGuildMember) {
+				return err
+			}
+			return ErrGuildPermissionDenied
+		}
+		if err := store.GetGuildApplicationForUpdate(ctx, guildID, targetUID); err != nil {
+			return err
+		}
+		if _, err := store.GetMembership(ctx, targetUID); err == nil {
+			return ErrAlreadyInGuild
+		} else if !errors.Is(err, repo.ErrNotGuildMember) {
+			return err
+		}
+		return store.AddGuildMemberData(ctx, repo.GuildMemberRecord{
+			GuildID: guildID, UID: targetUID, Role: repo.GuildRoleMember, JoinedAt: time.Now().UTC().Unix(),
+		}, reqID)
+	})
 }
 
 // Leave 退出当前公会。
@@ -153,10 +237,63 @@ func (s LocalGuildService) Leave(ctx context.Context, uid string, reqID string) 
 	if err := requireReqID(reqID); err != nil {
 		return err
 	}
-	return s.Repo.LeaveGuild(ctx, uid)
+	return s.withTransaction(ctx, func(store *repo.DBGuildRepository) error {
+		if err := store.LockPlayer(ctx, uid); err != nil {
+			return err
+		}
+		membership, err := store.GetMembership(ctx, uid)
+		if err != nil {
+			return err
+		}
+		if err := store.LockGuild(ctx, membership.GuildID); err != nil {
+			return err
+		}
+		if membership.Role != repo.GuildRoleLeader {
+			return store.RemoveGuildMemberData(ctx, uid)
+		}
+
+		successor, found, err := store.FindGuildSuccessorForUpdate(ctx, membership.GuildID, uid)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return store.DeleteGuildData(ctx, membership.GuildID, uid)
+		}
+		return store.TransferGuildLeadershipData(ctx, membership.GuildID, uid, successor.UID)
+	})
+}
+
+// withTransaction 为一次公会命令提供统一事务边界和事务内 Repository。
+func (s LocalGuildService) withTransaction(ctx context.Context, fn func(*repo.DBGuildRepository) error) error {
+	if s.Repo == nil {
+		return fmt.Errorf("guild repository is nil")
+	}
+	return s.Tx.Do(ctx, func(tx *gorm.DB) error {
+		return fn(s.Repo.WithTx(tx))
+	})
+}
+
+// lockGuildPlayers 按固定 UID 顺序加锁，避免多玩家命令出现相反锁序。
+func lockGuildPlayers(ctx context.Context, store *repo.DBGuildRepository, uids ...string) error {
+	sort.Strings(uids)
+	for i, uid := range uids {
+		if i > 0 && uid == uids[i-1] {
+			continue
+		}
+		if err := store.LockPlayer(ctx, uid); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func toGuildInfo(record repo.GuildRecord) GuildInfo {
+	joinStatus := "none"
+	if record.MyRole != "" {
+		joinStatus = "member"
+	} else if record.HasApplication {
+		joinStatus = "applied"
+	}
 	members := make([]GuildMember, 0, len(record.Members))
 	for _, member := range record.Members {
 		members = append(members, GuildMember{UID: member.UID, Role: member.Role, JoinedAt: member.JoinedAt})
@@ -167,7 +304,7 @@ func toGuildInfo(record repo.GuildRecord) GuildInfo {
 		OwnerUID:    record.OwnerUID,
 		MemberCount: record.MemberCount,
 		MyRole:      record.MyRole,
-		JoinStatus:  record.JoinStatus,
+		JoinStatus:  joinStatus,
 		Members:     members,
 	}
 }

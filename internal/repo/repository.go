@@ -104,6 +104,7 @@ type FriendRepository interface {
 
 // GuildMemberRecord 是公会成员仓储 DTO。
 type GuildMemberRecord struct {
+	GuildID  string
 	UID      string
 	Role     string
 	JoinedAt int64
@@ -111,13 +112,13 @@ type GuildMemberRecord struct {
 
 // GuildRecord 是公会查询仓储 DTO。
 type GuildRecord struct {
-	GuildID     string
-	Name        string
-	OwnerUID    string
-	MemberCount int
-	MyRole      string
-	JoinStatus  string
-	Members     []GuildMemberRecord
+	GuildID        string
+	Name           string
+	OwnerUID       string
+	MemberCount    int
+	MyRole         string
+	HasApplication bool
+	Members        []GuildMemberRecord
 }
 
 // GuildApplicationRecord 是待审批入会申请的仓储 DTO。
@@ -127,17 +128,6 @@ type GuildApplicationRecord struct {
 	Nickname  string
 	AvatarID  int64
 	CreatedAt int64
-}
-
-// GuildRepository 定义公会主体、成员和申请的持久化能力。
-type GuildRepository interface {
-	CreateGuild(ctx context.Context, uid string, guildID string, name string, reqID string) (GuildRecord, error)
-	SearchGuilds(ctx context.Context, uid string, keyword string, afterID uint64, limit int) ([]GuildRecord, uint64, error)
-	GetGuild(ctx context.Context, uid string, guildID string) (GuildRecord, error)
-	ListGuildApplications(ctx context.Context, operatorUID string, guildID string, afterID uint64, limit int) ([]GuildApplicationRecord, uint64, error)
-	CreateGuildApplication(ctx context.Context, uid string, guildID string, reqID string) error
-	ApproveGuildApplication(ctx context.Context, operatorUID string, guildID string, targetUID string, reqID string) error
-	LeaveGuild(ctx context.Context, uid string) error
 }
 
 // GuildMembershipReader 只暴露聊天解析当前公会频道需要的成员查询。
