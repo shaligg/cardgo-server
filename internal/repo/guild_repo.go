@@ -155,20 +155,21 @@ func (r *DBGuildRepository) ListGuildApplications(ctx context.Context, operatorU
 	for _, row := range rows {
 		uids = append(uids, row.UID)
 	}
-	levels, err := playerLevels(ctx, r.db, uids)
+	profiles, err := playerProfiles(ctx, r.db, uids)
 	if err != nil {
 		return nil, 0, err
 	}
 	result := make([]GuildApplicationRecord, 0, len(rows))
 	for _, row := range rows {
-		level := levels[row.UID]
-		if level == 0 {
-			level = 1
+		profile, ok := profiles[row.UID]
+		if !ok {
+			return nil, 0, fmt.Errorf("%w: %s", ErrSocialPlayerNotFound, row.UID)
 		}
 		result = append(result, GuildApplicationRecord{
 			UID:       row.UID,
-			Level:     level,
-			Nickname:  row.UID,
+			Level:     profile.Level,
+			Nickname:  profile.Nickname,
+			AvatarID:  profile.AvatarID,
 			CreatedAt: row.CreatedAt.Unix(),
 		})
 	}

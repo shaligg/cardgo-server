@@ -124,7 +124,7 @@ func (r *DBFriendRepository) ListFriendRelations(ctx context.Context, uid string
 			otherUIDs = append(otherUIDs, row.UIDLow)
 		}
 	}
-	levels, err := playerLevels(ctx, r.db, otherUIDs)
+	profiles, err := playerProfiles(ctx, r.db, otherUIDs)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -135,15 +135,16 @@ func (r *DBFriendRepository) ListFriendRelations(ctx context.Context, uid string
 		if otherUID == uid {
 			otherUID = row.UIDHigh
 		}
-		level := levels[otherUID]
-		if level == 0 {
-			level = 1
+		profile, ok := profiles[otherUID]
+		if !ok {
+			return nil, 0, fmt.Errorf("%w: %s", ErrSocialPlayerNotFound, otherUID)
 		}
 		result = append(result, FriendRecord{
 			OtherUID:     otherUID,
 			RequesterUID: row.RequesterUID,
-			Level:        level,
-			Nickname:     otherUID,
+			Level:        profile.Level,
+			Nickname:     profile.Nickname,
+			AvatarID:     profile.AvatarID,
 			Status:       row.Status,
 		})
 	}

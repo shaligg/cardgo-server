@@ -46,7 +46,7 @@ func (r *DBAssetRepository) ChangeGoldInTx(ctx context.Context, tx *gorm.DB, uid
 	if reason == "" {
 		reason = "asset.change_gold"
 	}
-	current, err := getOrCreatePlayer(ctx, tx, uid)
+	current, err := getPlayer(ctx, tx, uid)
 	if err != nil {
 		return Player{}, err
 	}

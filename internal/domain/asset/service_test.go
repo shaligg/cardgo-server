@@ -176,6 +176,9 @@ func newRealAssetService(t *testing.T) (Service, *realAssetTestRepository, *gorm
 		DBPlayerRepository: repo.NewDBPlayerRepository(gdb),
 		DBAssetRepository:  repo.NewDBAssetRepository(gdb),
 	}
+	if _, err := dbRepo.CreateIfAbsent(context.Background(), repo.Player{UID: "u1", Nickname: "u1", AvatarID: 1, Level: 1}); err != nil {
+		t.Fatalf("create player: %v", err)
+	}
 	svc := newTestService(t, dbRepo.DBAssetRepository, dbRepo.DBAssetRepository)
 	svc.Tx = idb.NewTxManager(gdb)
 	return svc, dbRepo, gdb

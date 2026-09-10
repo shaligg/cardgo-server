@@ -14,7 +14,9 @@ func TestFriendHandlerUsesAuthenticatedUID(t *testing.T) {
 	playerRepo := repo.NewDBPlayerRepository(db)
 	friendRepo := repo.NewDBFriendRepository(db)
 	for _, uid := range []string{"auth_uid", "target_uid", "evil_uid"} {
-		if _, err := playerRepo.GetByUID(context.Background(), uid); err != nil {
+		if _, err := playerRepo.CreateIfAbsent(context.Background(), repo.Player{
+			UID: uid, Nickname: "Nick_" + uid, AvatarID: 1, Level: 1,
+		}); err != nil {
 			t.Fatalf("create player %s: %v", uid, err)
 		}
 	}

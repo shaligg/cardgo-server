@@ -29,6 +29,9 @@ func newTestWorkshopService(t *testing.T) (Service, *workshopTestRepository, *go
 		DBAssetRepository:    repo.NewDBAssetRepository(db),
 		DBWorkshopRepository: repo.NewDBWorkshopRepository(db),
 	}
+	if _, err := dbRepo.CreateIfAbsent(context.Background(), repo.Player{UID: "u1", Nickname: "u1", AvatarID: 1, Level: 1}); err != nil {
+		t.Fatalf("create player: %v", err)
+	}
 	items, err := gamedata.NewCatalog([]gamedata.ItemConfig{
 		{ItemID: gamedata.ItemIDGold, Key: "gold", StorageType: gamedata.StoragePlayerField, StorageKey: "gold", Stackable: true},
 		{ItemID: gamedata.ItemIDBasicMaterial, Key: "basic_material", StorageType: gamedata.StorageInventoryStack, Stackable: true},

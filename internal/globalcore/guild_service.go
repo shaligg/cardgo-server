@@ -32,6 +32,7 @@ type GuildApplication struct {
 	UID       string `json:"uid"`
 	Level     int    `json:"level"`
 	Nickname  string `json:"nickname"`
+	AvatarID  int64  `json:"avatar_id"`
 	CreatedAt int64  `json:"created_at"`
 }
 
@@ -115,6 +116,7 @@ func (s LocalGuildService) ListApplications(ctx context.Context, operatorUID str
 			UID:       row.UID,
 			Level:     row.Level,
 			Nickname:  row.Nickname,
+			AvatarID:  row.AvatarID,
 			CreatedAt: row.CreatedAt,
 		})
 	}

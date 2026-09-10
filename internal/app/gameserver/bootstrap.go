@@ -221,8 +221,8 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 				ilog.Errorf("mark player owner offline failed uid=%s conn=%s err=%v", uid, connID, err)
 			}
 		},
-		OnRestoreState: buildRestoreStateCallback(playerRepo),
-		Metrics:        metricsReg,
+		PreparePlayer: buildPreparePlayerCallback(playerService),
+		Metrics:       metricsReg,
 	})
 	ownerReconciler := &playerOwnerReconciler{
 		nodeID:   cfg.Server.NodeID,

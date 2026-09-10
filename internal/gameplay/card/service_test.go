@@ -26,6 +26,9 @@ func newTestCardService(t *testing.T) (Service, *cardTestRepository) {
 		DBAssetRepository:  repo.NewDBAssetRepository(db),
 		DBCardRepository:   repo.NewDBCardRepository(db),
 	}
+	if _, err := dbRepo.CreateIfAbsent(context.Background(), repo.Player{UID: "u1", Nickname: "u1", AvatarID: 1, Level: 1}); err != nil {
+		t.Fatalf("create player: %v", err)
+	}
 	items, err := gamedata.NewCatalog([]gamedata.ItemConfig{
 		{ItemID: gamedata.ItemIDGold, Key: "gold", StorageType: gamedata.StoragePlayerField, StorageKey: "gold", Stackable: true},
 	})

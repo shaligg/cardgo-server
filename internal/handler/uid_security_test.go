@@ -82,5 +82,8 @@ func newUIDSecurityRepo(t *testing.T) (*uidSecurityRepository, *gorm.DB) {
 		DBPlayerRepository: repo.NewDBPlayerRepository(db),
 		DBAssetRepository:  repo.NewDBAssetRepository(db),
 	}
+	if _, err := dbRepo.CreateIfAbsent(context.Background(), repo.Player{UID: "auth_uid", Nickname: "auth", AvatarID: 1, Level: 1}); err != nil {
+		t.Fatalf("create player: %v", err)
+	}
 	return dbRepo, db
 }

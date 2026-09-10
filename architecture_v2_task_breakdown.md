@@ -259,6 +259,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 18. TODO：在预发环境执行 P6 灰度发布和故障注入演练，补充演练记录。
 19. 不新增无调用方的架构预留模块；按以上顺序一次修复一个现有问题。
 20. DEFERRED：监控确认重复 DB 读取成为瓶颈后，再按技术架构 7.6 节实现 `OnlinePlayerStore`；实施前必须先完成跨节点单写者 fencing，当前 Demo 不提前增加该调用链。
+21. DONE：补齐玩家资料闭环：`players` 增加昵称、头像和时间字段；查询不再隐式建号；验票后先显式幂等初始化玩家，再绑定会话和 Redis 归属；好友列表与公会申请读取真实玩家资料。
 
 ## 8. 卡牌 MVP 后续任务拆分
 
@@ -282,14 +283,14 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 
 ### 8.2 B1 玩家与资产主链路
 
-当前进度：DONE。已完成金币 `player_field` 通过 `AssetService` 发放/扣除、资产流水和 WS smoke；普通请求重试由 Dispatcher 近期结果缓存保护，`inventory_stack` 留到 B2 接入。
+当前进度：DONE。已完成显式新玩家初始化、基础资料查询、金币 `player_field` 发放/扣除、资产流水和 WS smoke；普通请求重试由 Dispatcher 近期结果缓存保护，`inventory_stack` 留到 B2 接入。
 目标：
 
 - 打通新玩家初始化、资产查询、统一发奖扣费。
 
 任务：
 
-1. DONE：整理 `player_profile`、`asset_log`，高频基础货币继续存玩家基础表；普通请求不建立永久幂等记录表。
+1. DONE：整理 `players`、`asset_log`，`players` 保存 UID、昵称、头像、等级、金币和创建/更新时间；查询保持纯读，建号由登录接入显式调用；普通请求不建立永久幂等记录表。
 2. DONE：实现 `AssetService.Grant` 的金币最小链路。
 3. DONE：实现 `AssetService.Consume` 的金币最小链路。
 4. MOVED：通用可堆叠背包 `player_item / inventory_stack` 移入 B2。

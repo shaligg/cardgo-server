@@ -12,6 +12,7 @@ type FriendItem struct {
 	UID      string `json:"uid"`
 	Level    int    `json:"level"`
 	Nickname string `json:"nickname"`
+	AvatarID int64  `json:"avatar_id"`
 	Status   string `json:"status"`
 }
 
@@ -87,6 +88,7 @@ func (s LocalFriendService) List(ctx context.Context, uid string, cursor string,
 			UID:      row.OtherUID,
 			Level:    row.Level,
 			Nickname: row.Nickname,
+			AvatarID: row.AvatarID,
 			Status:   status,
 		})
 	}

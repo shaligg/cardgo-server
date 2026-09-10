@@ -11,7 +11,11 @@ import (
 func TestChangeGoldWritesAssetLog(t *testing.T) {
 	db := testdb.OpenGame(t)
 	assetRepo := NewDBAssetRepository(db)
+	playerRepo := NewDBPlayerRepository(db)
 	ctx := context.Background()
+	if _, err := playerRepo.CreateIfAbsent(ctx, Player{UID: "u1", Nickname: "u1", AvatarID: 1, Level: 1}); err != nil {
+		t.Fatalf("create player: %v", err)
+	}
 
 	first, err := assetRepo.ChangeGold(ctx, "u1", 100, 1, "test.grant", "r1")
 	if err != nil {
@@ -33,7 +37,11 @@ func TestChangeGoldWritesAssetLog(t *testing.T) {
 func TestChangeGoldInsufficientDoesNotWriteSideEffects(t *testing.T) {
 	db := testdb.OpenGame(t)
 	assetRepo := NewDBAssetRepository(db)
+	playerRepo := NewDBPlayerRepository(db)
 	ctx := context.Background()
+	if _, err := playerRepo.CreateIfAbsent(ctx, Player{UID: "u1", Nickname: "u1", AvatarID: 1, Level: 1}); err != nil {
+		t.Fatalf("create player: %v", err)
+	}
 
 	_, err := assetRepo.ChangeGold(ctx, "u1", -1, 1, "test.consume", "r2")
 	if err != ErrInsufficientGold {

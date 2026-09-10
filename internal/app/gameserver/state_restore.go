@@ -3,24 +3,23 @@ package gameserver
 import (
 	"context"
 
-	"github.com/bigfish/go_orm_1/internal/repo"
+	playergame "github.com/bigfish/go_orm_1/internal/domain/player"
 )
 
-// buildRestoreStateCallback 从正式玩家表构造鉴权后的基础同步数据。
-func buildRestoreStateCallback(players repo.PlayerRepository) func(ctx context.Context, uid string) (map[string]interface{}, bool) {
-	return func(ctx context.Context, uid string) (map[string]interface{}, bool) {
-		if players == nil {
-			return nil, false
-		}
-		player, err := players.GetByUID(ctx, uid)
+// buildPreparePlayerCallback 在会话绑定前初始化玩家，并构造鉴权后的基础同步数据。
+func buildPreparePlayerCallback(players playergame.Service) func(ctx context.Context, uid string) (map[string]interface{}, error) {
+	return func(ctx context.Context, uid string) (map[string]interface{}, error) {
+		player, err := players.EnsureCreated(ctx, uid)
 		if err != nil {
-			return nil, false
+			return nil, err
 		}
 		data := map[string]interface{}{
-			"uid":   player.UID,
-			"level": player.Level,
-			"gold":  player.Gold,
+			"uid":       player.UID,
+			"nickname":  player.Nickname,
+			"avatar_id": player.AvatarID,
+			"level":     player.Level,
+			"gold":      player.Gold,
 		}
-		return data, true
+		return data, nil
 	}
 }

@@ -629,8 +629,9 @@ Client -> GameServer gateway/ws: auth_req(new enter_ticket)
 3. 客户端使用返回的 `ws_addr` 直连目标 GameServer 的 `gateway/ws`。
 4. 客户端连接游戏服后首帧必须 `auth(ticket)`。
 5. GameServer 校验 `ticket.server_id` 必须等于自身 `server_id`。
-6. GameServer 验票成功后创建会话并返回 `auth_ok`。
-7. 目标 GameServer 达到硬上限时返回 `SERVER_FULL`；客户端重新请求 LoginService，由节点分配器选择其他可用节点。
+6. GameServer 验票成功后调用 `domain/player.Service.EnsureCreated`，显式、幂等地初始化新玩家并读取基础同步数据；初始化失败时拒绝接入，不创建会话或 Redis 玩家归属。
+7. 玩家准备完成后，GameServer 才绑定本机会话、认领 Redis 玩家归属并返回包含 `resync` 的 `auth_ok`。
+8. 目标 GameServer 达到硬上限时返回 `SERVER_FULL`；客户端重新请求 LoginService，由节点分配器选择其他可用节点。
 
 当前 MVP 不存在：
 
@@ -671,7 +672,8 @@ MVP 固定使用 HMAC-SHA256：
 2. 登录模块分配节点并签发 ticket
 3. 登录模块返回目标 GameServer 的 `server_id`、`ws_addr` 和 `enter_ticket`
 4. 客户端直连目标 GameServer 的 `gateway/ws` 并发送 auth
-5. 游戏服验票通过后建立 session
+5. 游戏服验票通过后显式初始化或读取玩家基础资料
+6. 玩家准备成功后建立 session、认领 Redis 玩家归属并返回 `auth_ok + resync`
 
 说明：
 
@@ -684,10 +686,11 @@ MVP 固定使用 HMAC-SHA256：
 ### 7.2 读流程
 1. `Service -> Repository.GetX`
 2. `Repository` 使用 GORM/Model 查询 DB，并返回业务所需的数据结构。
-3. Repository 可以是具体实现或窄接口，但不能为了单次简单查询机械增加一套接口与适配器。
-4. 未来实现 `OnlinePlayerStore` 后，Service 对允许在线驻留的数据先读取 Store；模块未加载时由 Store 的 Loader 调用对应 Repository，加载成功后放入当前玩家聚合。
-5. Repository 不读取或更新 `OnlinePlayerStore`，不在线对象仍由业务模块按需查询 DB。
-6. 排行榜等公共热点由所属模块直接使用 Redis，并在监控确认瓶颈后增加专用短期快照。
+3. `GetX` 是纯读操作，数据不存在时返回明确错误；禁止用查询方法隐式创建玩家或玩法数据。
+4. Repository 可以是具体实现或窄接口，但不能为了单次简单查询机械增加一套接口与适配器。
+5. 未来实现 `OnlinePlayerStore` 后，Service 对允许在线驻留的数据先读取 Store；模块未加载时由 Store 的 Loader 调用对应 Repository，加载成功后放入当前玩家聚合。
+6. Repository 不读取或更新 `OnlinePlayerStore`，不在线对象仍由业务模块按需查询 DB。
+7. 排行榜等公共热点由所属模块直接使用 Redis，并在监控确认瓶颈后增加专用短期快照。
 
 ### 7.3 写流程
 1. `Service` 完成业务判断，决定本次消耗、奖励和玩法状态变更。
@@ -956,7 +959,7 @@ Dispatcher 按 uid 串行
 
 | 类型 | 存储位置 | 示例 | 说明 |
 |---|---|---|---|
-| 高频基础货币 | `player_profile` 或同类玩家基础表字段 | 金币、钻石、体力、声望 | 读取频繁，首页常展示，可以直接放玩家表 |
+| 高频基础货币 | `players` 或同类玩家基础表字段 | 金币、钻石、体力、声望 | 读取频繁，首页常展示，可以直接放玩家表 |
 | 跨系统可堆叠道具 | `player_item(uid, item_id, count)` | 材料、碎片、消耗券、宝箱钥匙 | 通用背包表只存可堆叠道具 |
 | 系统专属资源 | 所属系统表字段 | 竞技币、公会贡献、活动币 | 如果只在单一系统内产消，放该系统表 |
 | 不可堆叠实例 | 所属系统实例表 | 卡牌、装饰、宠物、装备 | 不进入通用背包表，按系统单独建表 |
@@ -1017,7 +1020,7 @@ Dispatcher 按 uid 串行
 ```text
 RewardItem(item_id=1, count=100)
   -> ItemConfig.storage_type = player_field
-  -> 更新 player_profile.gold
+  -> 更新 players.gold
 
 RewardItem(item_id=10001, count=5)
   -> ItemConfig.storage_type = inventory_stack
@@ -1115,7 +1118,7 @@ MVP 至少需要以下业务表：
 
 | 表 | 模块 | 说明 | 一致性 |
 |---|---|---|---|
-| `player_profile` | player/asset | uid、昵称、等级、章节进度；MVP 可包含金币、钻石、体力、声望等高频基础货币 | A |
+| `players` | domain/player、domain/asset | `uid`、`nickname`、`avatar_id`、`level`、`gold`、`created_at`、`updated_at`；关卡进度不混入主表 | A |
 | `player_item` | inventory | 可堆叠通用道具：材料、碎片、消耗券、宝箱钥匙等 | A |
 | `player_card` | card | 卡牌拥有记录或实例：等级、经验、星级、数量等由卡牌系统定义 | A |
 | `player_deck` | deck | 卡组方案、卡牌列表 | A |
@@ -1673,13 +1676,19 @@ package repo
 import "context"
 
 type Player struct {
-	UID   string
-	Level int
-	Gold  int64
+	UID      string
+	Nickname string
+	AvatarID int64
+	Level    int
+	Gold     int64
 }
 
 type PlayerRepository interface {
 	GetByUID(ctx context.Context, uid string) (Player, error)
+	CreateIfAbsent(ctx context.Context, player Player) (Player, error)
+}
+
+type PlayerAssetRepository interface {
 	ChangeGold(ctx context.Context, uid string, delta int64, itemID int64, reason string, reqID string) (Player, error)
 }
 ```
@@ -1694,6 +1703,7 @@ import (
 )
 
 type PlayerService interface {
+	EnsureCreated(ctx context.Context, uid string) (repo.Player, error)
 	QueryProfile(ctx context.Context, uid string) (repo.Player, error)
 	AddGold(ctx context.Context, uid string, delta int64, reqID string) (repo.Player, error)
 	ConsumeGold(ctx context.Context, uid string, amount int64, reqID string) (repo.Player, error)

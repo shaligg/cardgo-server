@@ -14,9 +14,11 @@ import (
 //
 // 它不是数据库模型，避免上层业务直接依赖 GORM 字段或表结构。
 type Player struct {
-	UID   string
-	Level int
-	Gold  int64
+	UID      string `json:"uid"`
+	Nickname string `json:"nickname"`
+	AvatarID int64  `json:"avatar_id"`
+	Level    int    `json:"level"`
+	Gold     int64  `json:"gold"`
 }
 
 // InventoryItem 是业务层使用的通用可堆叠背包项。
@@ -37,6 +39,9 @@ var ErrInsufficientGold = errors.New("insufficient gold")
 
 // ErrInsufficientItem 表示玩家背包道具数量不足。
 var ErrInsufficientItem = errors.New("insufficient item")
+
+// ErrPlayerNotFound 表示玩家基础资料不存在。
+var ErrPlayerNotFound = errors.New("player not found")
 
 // ErrCardNotOwned 表示玩家尚未拥有目标卡牌。
 var ErrCardNotOwned = errors.New("card not owned")
@@ -85,6 +90,7 @@ type FriendRecord struct {
 	RequesterUID string
 	Level        int
 	Nickname     string
+	AvatarID     int64
 	Status       string
 }
 
@@ -119,6 +125,7 @@ type GuildApplicationRecord struct {
 	UID       string
 	Level     int
 	Nickname  string
+	AvatarID  int64
 	CreatedAt int64
 }
 
@@ -157,6 +164,7 @@ type ChatRepository interface {
 // PlayerRepository 定义玩家基础资料的持久化能力。
 type PlayerRepository interface {
 	GetByUID(ctx context.Context, uid string) (Player, error)
+	CreateIfAbsent(ctx context.Context, player Player) (Player, error)
 }
 
 // PlayerAssetRepository 定义玩家主表字段类资产的写入能力。

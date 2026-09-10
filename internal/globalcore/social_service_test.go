@@ -75,7 +75,7 @@ func TestLocalGuildAndChatLifecycle(t *testing.T) {
 		t.Fatalf("ApplyJoin: %v", err)
 	}
 	applications, _, err := guilds.ListApplications(ctx, "guild_owner", guild.GuildID, "", 20)
-	if err != nil || len(applications) != 1 || applications[0].UID != "guild_member" {
+	if err != nil || len(applications) != 1 || applications[0].UID != "guild_member" || applications[0].Nickname != "Nick_guild_member" || applications[0].AvatarID != 1 {
 		t.Fatalf("ListApplications = %#v err=%v", applications, err)
 	}
 	if _, _, err := guilds.ListApplications(ctx, "guild_outsider", guild.GuildID, "", 20); !errors.Is(err, ErrGuildPermissionDenied) {
@@ -149,7 +149,7 @@ func assertFriendStatus(t *testing.T, service LocalFriendService, uid string, ot
 	if err != nil {
 		t.Fatalf("List %s: %v", uid, err)
 	}
-	if len(items) != 1 || items[0].UID != otherUID || items[0].Status != status || nextCursor != "" {
+	if len(items) != 1 || items[0].UID != otherUID || items[0].Nickname != "Nick_"+otherUID || items[0].AvatarID != 1 || items[0].Status != status || nextCursor != "" {
 		t.Fatalf("List %s = %#v cursor=%q", uid, items, nextCursor)
 	}
 }
@@ -171,7 +171,9 @@ func newSocialRepository(t *testing.T, uids ...string) *socialTestRepository {
 		DBChatRepository:   repo.NewDBChatRepository(db),
 	}
 	for _, uid := range uids {
-		if _, err := dbRepo.DBPlayerRepository.GetByUID(context.Background(), uid); err != nil {
+		if _, err := dbRepo.DBPlayerRepository.CreateIfAbsent(context.Background(), repo.Player{
+			UID: uid, Nickname: "Nick_" + uid, AvatarID: 1, Level: 1,
+		}); err != nil {
 			t.Fatalf("create player %s: %v", uid, err)
 		}
 	}

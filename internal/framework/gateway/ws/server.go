@@ -38,7 +38,7 @@ type Options struct {
 	BizHandler      BizHandler
 	OnSessionBound  func(ctx context.Context, uid string, connID string) error
 	OnDisconnect    func(ctx context.Context, uid string, connID string)
-	OnRestoreState  func(ctx context.Context, uid string) (map[string]interface{}, bool)
+	PreparePlayer   func(ctx context.Context, uid string) (map[string]interface{}, error)
 	Metrics         *metrics.Registry
 }
 
@@ -60,7 +60,7 @@ type Server struct {
 	bizHandler     BizHandler
 	onSessionBound func(ctx context.Context, uid string, connID string) error
 	onDisconnect   func(ctx context.Context, uid string, connID string)
-	onRestoreState func(ctx context.Context, uid string) (map[string]interface{}, bool)
+	preparePlayer  func(ctx context.Context, uid string) (map[string]interface{}, error)
 	metrics        *metrics.Registry
 	codec          EnvelopeCodec
 
@@ -118,7 +118,7 @@ func NewServer(opts Options) *Server {
 		bizHandler:      opts.BizHandler,
 		onSessionBound:  opts.OnSessionBound,
 		onDisconnect:    opts.OnDisconnect,
-		onRestoreState:  opts.OnRestoreState,
+		preparePlayer:   opts.PreparePlayer,
 		metrics:         opts.Metrics,
 		codec:           opts.Codec,
 		sendQueueSize:   opts.SendQueueSize,
@@ -415,6 +415,18 @@ func (s *Server) authenticate(ctx context.Context, conn *websocket.Conn) (uid st
 		_ = s.writeServerFullWS(conn, first.Seq)
 		return "", "", nil, false
 	}
+	var resync map[string]interface{}
+	if s.preparePlayer != nil {
+		resync, err = s.preparePlayer(ctx, claims.UID)
+		if err != nil {
+			ilog.Errorf("prepare player failed uid=%s err=%v", claims.UID, err)
+			if s.metrics != nil {
+				s.metrics.IncWSAuthFailed()
+			}
+			_ = s.writeErrorConn(conn, first.Seq, terrors.CodeInternal, "prepare player failed")
+			return "", "", nil, false
+		}
+	}
 
 	connID = uuid.NewString()
 	oldConnID, accepted, err := s.sessionManager.BindWithinLimit(ctx, session.Session{
@@ -461,14 +473,8 @@ func (s *Server) authenticate(ctx context.Context, conn *websocket.Conn) (uid st
 			OK:        true,
 			UID:       claims.UID,
 			SessionID: connID,
+			Resync:    resync,
 		},
-	}
-	if s.onRestoreState != nil {
-		if resync, ok := s.onRestoreState(ctx, claims.UID); ok {
-			payload := ack.Payload.(dto.AuthAckPayload)
-			payload.Resync = resync
-			ack.Payload = payload
-		}
 	}
 	if !s.enqueueEnvelope(client, ack) {
 		if s.metrics != nil {
