@@ -133,18 +133,29 @@ func (s Service) UpgradeFacility(ctx context.Context, uid string, facilityID str
 	if !ok {
 		return FacilityUpgradeResult{}, fmt.Errorf("%w: %s", ErrFacilityNotFound, facilityID)
 	}
-	current, err := s.Repo.GetOrCreateFacility(ctx, uid, facilityID)
-	if err != nil {
-		return FacilityUpgradeResult{}, err
-	}
-	if current.Level >= facilityConfig.MaxLevel {
-		return FacilityUpgradeResult{}, repo.ErrFacilityMaxLevel
-	}
-
-	costs := s.upgradeCosts(facilityConfig, current.Level)
+	var costs []asset.CostItem
 	var facility repo.PlayerFacility
 	var player *repo.Player
 	if err := s.Tx.Do(ctx, func(tx *gorm.DB) error {
+		current, err := s.Repo.GetFacilityInTx(ctx, tx, uid, facilityID)
+		create := errors.Is(err, repo.ErrPlayerFacilityNotFound)
+		if err != nil && !create {
+			return err
+		}
+		if create {
+			current = repo.PlayerFacility{
+				UID:        uid,
+				FacilityID: facilityID,
+				Level:      1,
+				Unlocked:   true,
+				UnlockedAt: s.now().Unix(),
+			}
+		}
+		if current.Level >= facilityConfig.MaxLevel {
+			return repo.ErrFacilityMaxLevel
+		}
+
+		costs = s.upgradeCosts(facilityConfig, current.Level)
 		results, err := s.Assets.ApplyCostInTx(ctx, tx, uid, costs, "workshop.upgrade_facility", reqID)
 		if err != nil {
 			return err
@@ -155,8 +166,17 @@ func (s Service) UpgradeFacility(ctx context.Context, uid string, facilityID str
 				break
 			}
 		}
-		facility, err = s.Repo.UpgradeFacilityInTx(ctx, tx, uid, facilityID, facilityConfig.MaxLevel)
-		return err
+		current.Level++
+		if create {
+			err = s.Repo.CreateFacilityInTx(ctx, tx, current)
+		} else {
+			err = s.Repo.UpdateFacilityInTx(ctx, tx, current)
+		}
+		if err != nil {
+			return err
+		}
+		facility = current
+		return nil
 	}); err != nil {
 		return FacilityUpgradeResult{}, err
 	}

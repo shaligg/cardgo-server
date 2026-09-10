@@ -50,6 +50,9 @@ var ErrCardMaxLevel = errors.New("card already max level")
 // ErrFacilityMaxLevel 表示设施已经达到当前版本等级上限。
 var ErrFacilityMaxLevel = errors.New("facility already max level")
 
+// ErrPlayerFacilityNotFound 表示玩家还没有目标设施数据。
+var ErrPlayerFacilityNotFound = errors.New("player facility not found")
+
 // ErrLevelProgressNotFound 表示玩家还没有目标关卡的进度记录。
 var ErrLevelProgressNotFound = errors.New("level progress not found")
 
@@ -254,9 +257,9 @@ type PlayerFacility struct {
 type WorkshopRepository interface {
 	GetOrCreateWorkshop(ctx context.Context, uid string) (PlayerWorkshop, error)
 	GetFacilities(ctx context.Context, uid string) ([]PlayerFacility, error)
-	GetOrCreateFacility(ctx context.Context, uid string, facilityID string) (PlayerFacility, error)
-	UpgradeFacility(ctx context.Context, uid string, facilityID string, maxLevel int) (PlayerFacility, error)
-	UpgradeFacilityInTx(ctx context.Context, tx *gorm.DB, uid string, facilityID string, maxLevel int) (PlayerFacility, error)
+	GetFacilityInTx(ctx context.Context, tx *gorm.DB, uid string, facilityID string) (PlayerFacility, error)
+	CreateFacilityInTx(ctx context.Context, tx *gorm.DB, facility PlayerFacility) error
+	UpdateFacilityInTx(ctx context.Context, tx *gorm.DB, facility PlayerFacility) error
 	RecordOfflineRewardClaim(ctx context.Context, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error)
 	RecordOfflineRewardClaimInTx(ctx context.Context, tx *gorm.DB, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error)
 }

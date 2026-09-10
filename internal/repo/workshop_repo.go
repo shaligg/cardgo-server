@@ -49,76 +49,78 @@ func (r *DBPlayerRepository) GetFacilities(ctx context.Context, uid string) ([]P
 	return out, nil
 }
 
-// GetOrCreateFacility 查询玩家设施；不存在时创建 Lv.1 已解锁默认设施。
-func (r *DBPlayerRepository) GetOrCreateFacility(ctx context.Context, uid string, facilityID string) (PlayerFacility, error) {
-	var row model.PlayerFacility
-	err := r.db.WithContext(ctx).Where("uid = ? AND facility_id = ?", uid, facilityID).Take(&row).Error
-	if err == nil {
-		return toDomainPlayerFacility(row), nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return PlayerFacility{}, fmt.Errorf("query player facility: %w", err)
-	}
-
-	now := time.Now()
-	row = model.PlayerFacility{
-		UID:        uid,
-		FacilityID: facilityID,
-		Level:      1,
-		Unlocked:   true,
-		UnlockedAt: &now,
-	}
-	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
-		return PlayerFacility{}, fmt.Errorf("create player facility: %w", err)
-	}
-	return toDomainPlayerFacility(row), nil
-}
-
-// UpgradeFacility 在事务中提升设施等级。
-func (r *DBPlayerRepository) UpgradeFacility(ctx context.Context, uid string, facilityID string, maxLevel int) (PlayerFacility, error) {
-	var out PlayerFacility
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		out, err = r.UpgradeFacilityInTx(ctx, tx, uid, facilityID, maxLevel)
-		return err
-	})
-	if err != nil {
-		return PlayerFacility{}, err
-	}
-	return out, nil
-}
-
-// UpgradeFacilityInTx 在外部事务中提升设施等级。
-func (r *DBPlayerRepository) UpgradeFacilityInTx(ctx context.Context, tx *gorm.DB, uid string, facilityID string, maxLevel int) (PlayerFacility, error) {
+// GetFacilityInTx 在外部事务中查询玩家指定设施。
+func (r *DBPlayerRepository) GetFacilityInTx(ctx context.Context, tx *gorm.DB, uid string, facilityID string) (PlayerFacility, error) {
 	if tx == nil {
 		return PlayerFacility{}, fmt.Errorf("transaction is nil")
 	}
-
 	var row model.PlayerFacility
 	err := tx.WithContext(ctx).Where("uid = ? AND facility_id = ?", uid, facilityID).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		now := time.Now()
-		row = model.PlayerFacility{
-			UID:        uid,
-			FacilityID: facilityID,
-			Level:      1,
-			Unlocked:   true,
-			UnlockedAt: &now,
-		}
-		if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
-			return PlayerFacility{}, fmt.Errorf("create player facility: %w", err)
-		}
-	} else if err != nil {
+		return PlayerFacility{}, ErrPlayerFacilityNotFound
+	}
+	if err != nil {
 		return PlayerFacility{}, fmt.Errorf("query player facility: %w", err)
 	}
-	if row.Level >= maxLevel {
-		return PlayerFacility{}, ErrFacilityMaxLevel
-	}
-	row.Level++
-	if err := tx.WithContext(ctx).Save(&row).Error; err != nil {
-		return PlayerFacility{}, fmt.Errorf("save player facility: %w", err)
-	}
 	return toDomainPlayerFacility(row), nil
+}
+
+// CreateFacilityInTx 创建业务层已经计算完成的设施数据。
+func (r *DBPlayerRepository) CreateFacilityInTx(ctx context.Context, tx *gorm.DB, facility PlayerFacility) error {
+	if tx == nil {
+		return fmt.Errorf("transaction is nil")
+	}
+	row, err := playerFacilityModel(facility)
+	if err != nil {
+		return err
+	}
+	if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
+		return fmt.Errorf("create player facility: %w", err)
+	}
+	return nil
+}
+
+// UpdateFacilityInTx 保存业务层已经计算完成的设施数据。
+func (r *DBPlayerRepository) UpdateFacilityInTx(ctx context.Context, tx *gorm.DB, facility PlayerFacility) error {
+	if tx == nil {
+		return fmt.Errorf("transaction is nil")
+	}
+	row, err := playerFacilityModel(facility)
+	if err != nil {
+		return err
+	}
+	result := tx.WithContext(ctx).
+		Model(&model.PlayerFacility{}).
+		Where("uid = ? AND facility_id = ?", facility.UID, facility.FacilityID).
+		Updates(map[string]interface{}{
+			"level":       row.Level,
+			"unlocked":    row.Unlocked,
+			"unlocked_at": row.UnlockedAt,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("update player facility: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrPlayerFacilityNotFound
+	}
+	return nil
+}
+
+func playerFacilityModel(facility PlayerFacility) (model.PlayerFacility, error) {
+	if facility.UID == "" || facility.FacilityID == "" || facility.Level <= 0 {
+		return model.PlayerFacility{}, fmt.Errorf("invalid player facility uid=%s facility_id=%s level=%d", facility.UID, facility.FacilityID, facility.Level)
+	}
+	row := model.PlayerFacility{
+		UID:        facility.UID,
+		FacilityID: facility.FacilityID,
+		Level:      facility.Level,
+		Unlocked:   facility.Unlocked,
+	}
+	if facility.UnlockedAt > 0 {
+		unlockedAt := time.Unix(facility.UnlockedAt, 0)
+		row.UnlockedAt = &unlockedAt
+	}
+	return row, nil
 }
 
 // RecordOfflineRewardClaim 记录离线收益领取结果，并在有可结算时推进结算时间。

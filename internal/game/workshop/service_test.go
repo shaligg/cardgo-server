@@ -102,6 +102,27 @@ func TestUpgradeFacilityConsumesGoldAndLevelsUp(t *testing.T) {
 
 }
 
+func TestUpgradeFacilityUpdatesExistingFacility(t *testing.T) {
+	svc, dbRepo, _ := newTestWorkshopService(t)
+	ctx := context.Background()
+	if _, err := dbRepo.ChangeGold(ctx, "u1", 500, gamedata.ItemIDGold, "test.grant", "gold-r1"); err != nil {
+		t.Fatalf("grant gold: %v", err)
+	}
+	if _, err := dbRepo.ChangeInventoryItem(ctx, "u1", gamedata.ItemIDBasicMaterial, 10, "test.grant", "mat-r1"); err != nil {
+		t.Fatalf("grant material: %v", err)
+	}
+	if _, err := svc.UpgradeFacility(ctx, "u1", "oven", "facility-r1"); err != nil {
+		t.Fatalf("first UpgradeFacility: %v", err)
+	}
+	result, err := svc.UpgradeFacility(ctx, "u1", "oven", "facility-r2")
+	if err != nil {
+		t.Fatalf("second UpgradeFacility: %v", err)
+	}
+	if result.OldLevel != 2 || result.NewLevel != 3 || result.Facility.Level != 3 {
+		t.Fatalf("second upgrade result = %+v, want level 2 -> 3", result)
+	}
+}
+
 func TestUpgradeFacilityRejectsUnknownFacility(t *testing.T) {
 	svc, _, _ := newTestWorkshopService(t)
 	_, err := svc.UpgradeFacility(context.Background(), "u1", "unknown", "facility-r1")
