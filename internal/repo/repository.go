@@ -50,6 +50,9 @@ var ErrCardMaxLevel = errors.New("card already max level")
 // ErrFacilityMaxLevel 表示设施已经达到当前版本等级上限。
 var ErrFacilityMaxLevel = errors.New("facility already max level")
 
+// ErrLevelProgressNotFound 表示玩家还没有目标关卡的进度记录。
+var ErrLevelProgressNotFound = errors.New("level progress not found")
+
 // 公共社交域的状态错误由仓储返回，LocalService 和未来 RemoteClient 共用同一语义。
 var (
 	ErrSocialPlayerNotFound     = errors.New("player not found")
@@ -183,9 +186,13 @@ type PlayerLevelProgress struct {
 	LastClearedAt  int64  `json:"last_cleared_at"`
 }
 
-// LevelProgressRepository 定义关卡结算事务需要的进度写入能力。
+// LevelProgressRepository 定义关卡结算事务需要的进度持久化能力。
+//
+// Repository 只读取和保存业务层已经计算完成的数据，不负责递增通关次数等业务规则。
 type LevelProgressRepository interface {
-	RecordLevelClearInTx(ctx context.Context, tx *gorm.DB, uid string, levelID int64) (PlayerLevelProgress, error)
+	GetLevelProgressInTx(ctx context.Context, tx *gorm.DB, uid string, levelID int64) (PlayerLevelProgress, error)
+	CreateLevelProgressInTx(ctx context.Context, tx *gorm.DB, progress PlayerLevelProgress) error
+	UpdateLevelProgressInTx(ctx context.Context, tx *gorm.DB, progress PlayerLevelProgress) error
 }
 
 // PlayerCard 是业务层使用的玩家卡牌拥有记录。

@@ -2,8 +2,8 @@ package repo
 
 import (
 	"context"
-	"sync"
 	"testing"
+	"time"
 
 	"github.com/bigfish/go_orm_1/internal/repo/model"
 	"github.com/bigfish/go_orm_1/internal/testutil/testdb"
@@ -38,38 +38,40 @@ func TestMigrateCreatesPlayerLevelProgressTable(t *testing.T) {
 	}
 }
 
-func TestRecordLevelClearInTxCountsConcurrentClears(t *testing.T) {
+func TestLevelProgressRepositoryCreatesAndUpdatesCalculatedProgress(t *testing.T) {
 	repo, db := newTestPlayerRepo(t)
 	ctx := context.Background()
-	start := make(chan struct{})
-	errs := make(chan error, 2)
-	var wg sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			errs <- db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-				_, err := repo.RecordLevelClearInTx(ctx, tx, "u1", 1)
-				return err
-			})
-		}()
+	now := time.Now().Unix()
+	progress := PlayerLevelProgress{
+		UID:            "u1",
+		LevelID:        1,
+		ClearCount:     1,
+		FirstClearedAt: now,
+		LastClearedAt:  now,
 	}
-	close(start)
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatalf("RecordLevelClearInTx returned error: %v", err)
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, err := repo.GetLevelProgressInTx(ctx, tx, "u1", 1); err != ErrLevelProgressNotFound {
+			t.Fatalf("missing progress error = %v, want ErrLevelProgressNotFound", err)
 		}
+		return repo.CreateLevelProgressInTx(ctx, tx, progress)
+	}); err != nil {
+		t.Fatalf("create progress: %v", err)
 	}
 
-	var progress model.PlayerLevelProgress
-	if err := db.Where("uid = ? AND level_id = ?", "u1", 1).Take(&progress).Error; err != nil {
-		t.Fatalf("query level progress: %v", err)
+	progress.ClearCount = 2
+	progress.LastClearedAt = now + 1
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return repo.UpdateLevelProgressInTx(ctx, tx, progress)
+	}); err != nil {
+		t.Fatalf("update progress: %v", err)
 	}
-	if progress.ClearCount != 2 {
-		t.Fatalf("clear_count = %d, want 2", progress.ClearCount)
+
+	var stored model.PlayerLevelProgress
+	if err := db.Where("uid = ? AND level_id = ?", "u1", 1).Take(&stored).Error; err != nil {
+		t.Fatalf("query stored level progress: %v", err)
+	}
+	if stored.ClearCount != 2 || stored.FirstClearedAt.Unix() != now || stored.LastClearedAt.Unix() != now+1 {
+		t.Fatalf("stored progress = %+v, want calculated values", stored)
 	}
 }
 

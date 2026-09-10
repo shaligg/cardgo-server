@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/bigfish/go_orm_1/internal/game/asset"
 	"github.com/bigfish/go_orm_1/internal/gamedata"
@@ -207,12 +208,30 @@ func (s *Service) SettleLevel(ctx context.Context, uid string, sessionID string,
 		if s.Progress == nil {
 			return fmt.Errorf("level progress repository is nil")
 		}
-		progress, err := s.Progress.RecordLevelClearInTx(ctx, tx, uid, rs.state.LevelID)
+		progress, err := s.Progress.GetLevelProgressInTx(ctx, tx, uid, rs.state.LevelID)
+		if err != nil && !errors.Is(err, repo.ErrLevelProgressNotFound) {
+			return err
+		}
+		now := time.Now().Unix()
+		result.FirstClear = errors.Is(err, repo.ErrLevelProgressNotFound)
+		if result.FirstClear {
+			progress = repo.PlayerLevelProgress{
+				UID:            uid,
+				LevelID:        rs.state.LevelID,
+				FirstClearedAt: now,
+			}
+		}
+		progress.ClearCount++
+		progress.LastClearedAt = now
+		if result.FirstClear {
+			err = s.Progress.CreateLevelProgressInTx(ctx, tx, progress)
+		} else {
+			err = s.Progress.UpdateLevelProgressInTx(ctx, tx, progress)
+		}
 		if err != nil {
 			return err
 		}
 		result.Progress = progress
-		result.FirstClear = progress.ClearCount == 1
 		result.Rewards = buildSettleRewards(rs, result.FirstClear)
 		if len(result.Rewards) == 0 {
 			return nil
