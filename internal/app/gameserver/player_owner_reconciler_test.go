@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/bigfish/go_orm_1/internal/platform/session"
-	"github.com/bigfish/go_orm_1/internal/platform/state"
 )
 
 type fakePlayerOwnerStore struct {
@@ -47,21 +46,6 @@ func (s *fakePlayerOwnerStore) RefreshOwned(ctx context.Context, serverID string
 	return nil
 }
 
-func TestPlayerOwnerReconcilerRemovesStateOwnedByAnotherNode(t *testing.T) {
-	online := state.NewOnlineState()
-	online.Set(state.PlayerState{UID: "u1", Data: map[string]interface{}{"gold": int64(10)}})
-	owners := &fakePlayerOwnerStore{owners: map[string]session.PlayerOwner{
-		"u1": {UID: "u1", ServerID: "gs-b", ConnID: "conn-b"},
-	}}
-	reconciler := &playerOwnerReconciler{nodeID: "gs-a", ownerTTL: time.Minute, owners: owners, online: online}
-
-	reconciler.ReconcileOwners(context.Background())
-
-	if _, ok := online.Get("u1"); ok {
-		t.Fatal("state owned by gs-b was not removed from gs-a")
-	}
-}
-
 func TestPlayerOwnerReconcilerRefreshesActiveOwner(t *testing.T) {
 	sessions := session.NewMemoryManager()
 	_, accepted, err := sessions.BindWithinLimit(context.Background(), session.Session{UID: "u1", ConnID: "conn-a"}, 10)
@@ -80,35 +64,22 @@ func TestPlayerOwnerReconcilerRefreshesActiveOwner(t *testing.T) {
 	}
 }
 
-func TestPlayerOwnerReconcilerKeepsStateWhenRedisFails(t *testing.T) {
-	online := state.NewOnlineState()
-	online.Set(state.PlayerState{UID: "u1", Data: map[string]interface{}{"gold": int64(10)}})
+func TestPlayerOwnerReconcilerKeepsActiveSessionWhenRedisFails(t *testing.T) {
+	sessions := session.NewMemoryManager()
+	_, accepted, err := sessions.BindWithinLimit(context.Background(), session.Session{UID: "u1", ConnID: "conn-a"}, 10)
+	if err != nil || !accepted {
+		t.Fatalf("bind session: accepted=%v err=%v", accepted, err)
+	}
 	reconciler := &playerOwnerReconciler{
-		nodeID: "gs-a",
-		owners: &fakePlayerOwnerStore{getErr: errors.New("redis unavailable")},
-		online: online,
+		nodeID:   "gs-a",
+		owners:   &fakePlayerOwnerStore{getErr: errors.New("redis unavailable")},
+		sessions: sessions,
 	}
 
 	reconciler.ReconcileOwners(context.Background())
 
-	if _, ok := online.Get("u1"); !ok {
-		t.Fatal("state was removed when Redis ownership query failed")
-	}
-}
-
-func TestPlayerOwnerReconcilerRemovesInactiveStateWhenOwnerExpires(t *testing.T) {
-	online := state.NewOnlineState()
-	online.Set(state.PlayerState{UID: "u1", Data: map[string]interface{}{"gold": int64(10)}})
-	reconciler := &playerOwnerReconciler{
-		nodeID: "gs-a",
-		owners: &fakePlayerOwnerStore{owners: map[string]session.PlayerOwner{}},
-		online: online,
-	}
-
-	reconciler.ReconcileOwners(context.Background())
-
-	if _, ok := online.Get("u1"); ok {
-		t.Fatal("inactive state was kept after Redis ownership expired")
+	if current, ok, getErr := sessions.GetByUID(context.Background(), "u1"); getErr != nil || !ok || current.ConnID != "conn-a" {
+		t.Fatalf("active session changed after Redis failure: session=%+v ok=%v err=%v", current, ok, getErr)
 	}
 }
 
@@ -118,18 +89,15 @@ func TestPlayerOwnerReconcilerKeepsActiveSessionWhenOwnerMissing(t *testing.T) {
 	if err != nil || !accepted {
 		t.Fatalf("bind session: accepted=%v err=%v", accepted, err)
 	}
-	online := state.NewOnlineState()
-	online.Set(state.PlayerState{UID: "u1", Data: map[string]interface{}{"gold": int64(10)}})
 	reconciler := &playerOwnerReconciler{
 		nodeID:   "gs-a",
 		owners:   &fakePlayerOwnerStore{owners: map[string]session.PlayerOwner{}},
 		sessions: sessions,
-		online:   online,
 	}
 
 	reconciler.ReconcileOwners(context.Background())
 
-	if _, ok := online.Get("u1"); !ok {
-		t.Fatal("active state was removed only because Redis ownership was missing")
+	if current, ok, getErr := sessions.GetByUID(context.Background(), "u1"); getErr != nil || !ok || current.ConnID != "conn-a" {
+		t.Fatalf("active session changed when owner was missing: session=%+v ok=%v err=%v", current, ok, getErr)
 	}
 }

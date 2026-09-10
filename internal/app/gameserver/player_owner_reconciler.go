@@ -8,7 +8,6 @@ import (
 	battlegame "github.com/bigfish/go_orm_1/internal/game/battle"
 	ilog "github.com/bigfish/go_orm_1/internal/infra/log"
 	"github.com/bigfish/go_orm_1/internal/platform/session"
-	"github.com/bigfish/go_orm_1/internal/platform/state"
 )
 
 // playerOwnerReconciler 定期清理已经迁移到其他 GameServer 的本机玩家运行时。
@@ -17,7 +16,6 @@ type playerOwnerReconciler struct {
 	ownerTTL time.Duration
 	owners   session.PlayerOwnerStore
 	sessions *session.MemoryManager
-	online   *state.OnlineState
 	battles  *battlegame.Service
 	commands *session.CommandCache
 	wsServer *ws.Server
@@ -69,11 +67,6 @@ func (r *playerOwnerReconciler) localUIDs(ctx context.Context) ([]string, map[st
 			active[current.UID] = true
 		}
 	}
-	if r.online != nil {
-		for _, current := range r.online.List() {
-			seen[current.UID] = true
-		}
-	}
 	if r.battles != nil {
 		for _, uid := range r.battles.PlayerUIDs() {
 			seen[uid] = true
@@ -91,9 +84,6 @@ func (r *playerOwnerReconciler) localUIDs(ctx context.Context) ([]string, map[st
 func (r *playerOwnerReconciler) removePlayerRuntime(ctx context.Context, uid string) {
 	if r.wsServer != nil {
 		r.wsServer.KickUID(ctx, uid, "player connected to another game server")
-	}
-	if r.online != nil {
-		r.online.Delete(uid)
 	}
 	if r.battles != nil {
 		r.battles.DeletePlayerRuntime(uid)

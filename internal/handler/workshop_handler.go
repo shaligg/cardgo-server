@@ -31,9 +31,6 @@ func (h *BizHandler) WorkshopUpgradeFacility(ctx context.Context, targetUID stri
 	if err != nil {
 		return nil, toBizError(err)
 	}
-	if result.Player != nil {
-		syncOnlinePlayerState(h.Online, *result.Player)
-	}
 	return result, nil
 }
 
@@ -46,9 +43,6 @@ func (h *BizHandler) WorkshopClaimOfflineReward(ctx context.Context, targetUID s
 	result, err := h.WorkshopService.ClaimOfflineReward(ctx, targetUID, req.ReqID)
 	if err != nil {
 		return nil, toBizError(err)
-	}
-	if result.Player != nil {
-		syncOnlinePlayerState(h.Online, *result.Player)
 	}
 	return result, nil
 }

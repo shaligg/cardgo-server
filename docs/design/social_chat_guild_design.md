@@ -113,7 +113,7 @@ WS Gateway
 
 约束：
 
-- `globalcore` 不引用 WebSocket、连接、Session 或 `OnlineState`。
+- `globalcore` 不引用 WebSocket、连接、Session 或 GameServer 私有运行态。
 - 当前 GameServer 在启动时注入 LocalService。
 - 将来独立部署公共服务时，GameServer 只把接口实现替换为 RemoteClient；Handler、协议 DTO 和核心语义不变。
 - 好友、公会和聊天是共享公共数据，不放入单个 GameServer 的进程内缓存作为权威状态。

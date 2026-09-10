@@ -18,7 +18,6 @@ func (h *BizHandler) PlayerGetProfile(ctx context.Context, targetUID string, pay
 	if err != nil {
 		return nil, &terrors.BizError{Code: terrors.CodeInternal, Msg: err.Error()}
 	}
-	syncOnlinePlayerState(h.Online, p)
 	return map[string]interface{}{
 		"player": p,
 	}, nil
@@ -34,7 +33,6 @@ func (h *BizHandler) PlayerAddGold(ctx context.Context, targetUID string, payloa
 	if err != nil {
 		return nil, toBizError(err)
 	}
-	syncOnlinePlayerState(h.Online, p)
 	return map[string]interface{}{
 		"player": p,
 	}, nil
@@ -50,7 +48,6 @@ func (h *BizHandler) PlayerConsumeGold(ctx context.Context, targetUID string, pa
 	if err != nil {
 		return nil, toBizError(err)
 	}
-	syncOnlinePlayerState(h.Online, p)
 	return map[string]interface{}{
 		"player": p,
 	}, nil

@@ -50,7 +50,6 @@ type Config struct {
 	} `yaml:"db"`
 	State struct {
 		OfflineTTLSec         int `yaml:"offline_ttl_sec"`
-		CleanupIntervalSec    int `yaml:"cleanup_interval_sec"`
 		OwnerCheckIntervalSec int `yaml:"owner_check_interval_sec"`
 		OwnerTTLSec           int `yaml:"owner_ttl_sec"`
 	} `yaml:"state"`
@@ -130,7 +129,6 @@ func defaultConfig() Config {
 	cfg.DB.ConnMaxLifetimeSeconds = 1800
 	cfg.DB.ConnMaxIdleTimeSeconds = 300
 	cfg.State.OfflineTTLSec = 120
-	cfg.State.CleanupIntervalSec = 10
 	cfg.State.OwnerCheckIntervalSec = 5
 	cfg.State.OwnerTTLSec = 120
 	cfg.Redis.Addr = "127.0.0.1:6379"
@@ -223,9 +221,6 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.State.OfflineTTLSec <= 0 {
 		cfg.State.OfflineTTLSec = 120
-	}
-	if cfg.State.CleanupIntervalSec <= 0 {
-		cfg.State.CleanupIntervalSec = 10
 	}
 	if cfg.State.OwnerCheckIntervalSec <= 0 {
 		cfg.State.OwnerCheckIntervalSec = 5

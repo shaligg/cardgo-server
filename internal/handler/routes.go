@@ -11,7 +11,6 @@ import (
 	playersvc "github.com/bigfish/go_orm_1/internal/game/player"
 	workshopsvc "github.com/bigfish/go_orm_1/internal/game/workshop"
 	"github.com/bigfish/go_orm_1/internal/globalcore"
-	"github.com/bigfish/go_orm_1/internal/platform/state"
 )
 
 // WebSearcher 是网页搜索 Handler 依赖的外部查询能力。
@@ -33,7 +32,6 @@ type BizHandler struct {
 	GuildService     globalcore.GuildService
 	ChatService      globalcore.ChatService
 	Searcher         WebSearcher
-	Online           *state.OnlineState
 }
 
 // NewRegisteredRouter 创建并注册所有游戏业务协议。

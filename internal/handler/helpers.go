@@ -9,7 +9,6 @@ import (
 	cardsvc "github.com/bigfish/go_orm_1/internal/game/card"
 	workshopsvc "github.com/bigfish/go_orm_1/internal/game/workshop"
 	"github.com/bigfish/go_orm_1/internal/globalcore"
-	"github.com/bigfish/go_orm_1/internal/platform/state"
 	"github.com/bigfish/go_orm_1/internal/repo"
 )
 
@@ -84,25 +83,4 @@ func isPreconditionFailedError(err error) bool {
 		errors.Is(err, globalcore.ErrNotGuildMember) ||
 		errors.Is(err, globalcore.ErrGuildPermissionDenied) ||
 		errors.Is(err, globalcore.ErrGuildApplicationExists)
-}
-
-// syncOnlinePlayerState 把最新玩家快照写入在线热状态。
-func syncOnlinePlayerState(online *state.OnlineState, p repo.Player) {
-	if online == nil {
-		return
-	}
-	prev, ok := online.Get(p.UID)
-	version := int64(1)
-	if ok {
-		version = prev.Version + 1
-	}
-	online.Set(state.PlayerState{
-		UID:     p.UID,
-		Version: version,
-		Data: map[string]interface{}{
-			"uid":   p.UID,
-			"level": p.Level,
-			"gold":  p.Gold,
-		},
-	})
 }

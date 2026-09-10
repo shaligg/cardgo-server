@@ -46,8 +46,5 @@ func (h *BizHandler) CardUpgrade(ctx context.Context, targetUID string, payload 
 	if err != nil {
 		return nil, toBizError(err)
 	}
-	if result.Player != nil {
-		syncOnlinePlayerState(h.Online, *result.Player)
-	}
 	return result, nil
 }

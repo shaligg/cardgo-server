@@ -144,7 +144,6 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		Guild:  globalcore.LocalGuildService{Repo: dbRepo},
 		Chat:   globalcore.LocalChatService{Messages: dbRepo, Membership: dbRepo},
 	}
-	onlineState := state.NewOnlineState()
 	shardExec := dispatcher.NewShardExecutor(cfg.Server.DispatcherShards)
 	commandCache := session.NewCommandCache(time.Duration(cfg.State.OfflineTTLSec)*time.Second, 10, 16*1024)
 	searchClient := websearch.NewClient(cfg.WebSearch.BaseURL, time.Duration(cfg.WebSearch.TimeoutMS)*time.Millisecond)
@@ -163,7 +162,6 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		GuildService:     publicCore.Guild,
 		ChatService:      publicCore.Chat,
 		Searcher:         searchClient,
-		Online:           onlineState,
 	}
 	bizRouter := handler.NewRegisteredRouter(bizHandler, cfg.Debug.EnableWSDebugOps)
 	bizDispatcher := handler.NewDispatcher(bizRouter, shardExec, commandCache)
@@ -189,9 +187,8 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 			if err != nil {
 				return err
 			}
-			// 无法证明归属连续时不复用本机旧状态，避免 A -> B -> A 后恢复 A 的过期副本。
+			// 无法证明归属连续时不复用本机局内状态和近期结果，避免 A -> B -> A 后恢复过期数据。
 			if previousOwner.ServerID != cfg.Server.NodeID {
-				onlineState.Delete(uid)
 				battleService.DeletePlayerRuntime(uid)
 				commandCache.Delete(uid)
 			}
@@ -216,9 +213,8 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 			if err := playerOwnerStore.MarkOffline(ctx, uid, cfg.Server.NodeID, connID, time.Duration(cfg.State.OfflineTTLSec)*time.Second); err != nil {
 				ilog.Errorf("mark player owner offline failed uid=%s conn=%s err=%v", uid, connID, err)
 			}
-			onlineState.MarkOffline(uid, time.Duration(cfg.State.OfflineTTLSec)*time.Second)
 		},
-		OnRestoreState: buildRestoreStateCallback(onlineState, dbRepo),
+		OnRestoreState: buildRestoreStateCallback(dbRepo),
 		Metrics:        metricsReg,
 	})
 	ownerReconciler := &playerOwnerReconciler{
@@ -226,13 +222,11 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		ownerTTL: time.Duration(cfg.State.OwnerTTLSec) * time.Second,
 		owners:   playerOwnerStore,
 		sessions: sessionManager,
-		online:   onlineState,
 		battles:  battleService,
 		commands: commandCache,
 		wsServer: wsServer,
 	}
-	stateMaintainer := state.NewMaintainer(onlineState, state.MaintainerOptions{
-		CleanupInterval:    time.Duration(cfg.State.CleanupIntervalSec) * time.Second,
+	stateMaintainer := state.NewMaintainer(state.MaintainerOptions{
 		OwnerCheckInterval: time.Duration(cfg.State.OwnerCheckIntervalSec) * time.Second,
 		OwnerReconciler:    ownerReconciler,
 	})

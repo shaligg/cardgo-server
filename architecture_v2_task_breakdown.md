@@ -113,7 +113,7 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 1. 登录链路：登录模块认证后签发 ticket。
 2. 接入链路：auth(ticket) 成功后绑定 session。
 3. 读链路：Service -> Repository -> DB。
-4. 写链路：DB 事务写入，成功后同步在线热状态。
+4. 写链路：DB 事务写入，提交成功后返回业务结果。
 5. 连接上限控制：`max_connections=2000`，超限返回 `SERVER_FULL`。
 6. A 类数据必须事务写入；普通 WS 重试由 Dispatcher 近期结果缓存保护，强幂等业务使用持久化业务唯一键，禁止走“仅内存后刷盘”。
 
@@ -133,7 +133,7 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 1. DONE：每连接使用一个独立有界 FIFO 发送队列；当前消息均为必要响应，队列满时关闭该慢客户端，不预建多级队列。
 2. DONE：已有入站限流和队列满踢慢客户端；连接退出时会同步回收对应的 `RateLimiter` 键。
 3. DONE：当前玩家协议按 `player` 路由键分片串行执行。
-4. DONE：已有断线恢复；`OnlineState` 仅保存在本机内存，同节点优先恢复，跨节点从正式业务表重建，离线状态按配置 TTL 定期清理。
+4. DONE：已有断线恢复；鉴权基础资料从正式业务表加载，同节点短时重连可继续使用尚未清理的 `BattleSession` 和近期请求结果，跨节点不复用旧节点运行态。
 5. DEFERRED：`guild/channel` 路由键随对应公共玩法实现，不在当前 Demo 创建空调用链。
 6. DONE：Redis 故障策略按当前真实用途收敛：启动注册失败则启动失败，运行中登录/归属认领失败则拒绝新会话，已有会话继续服务，节点心跳自动重试恢复；nonce/session 仍为进程内实现。
 7. DONE：globalcore 保留公共领域核心边界，承载接口、DTO、Local/Remote 适配和可复用规则；globalserver 建立结算/批处理编排边界，但不作为独立进程进入 MVP 主链路。
@@ -241,7 +241,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 ## 7. 当前后续任务（2026-09-09）
 1. DONE：P0-P3 与卡牌 MVP B0-B7 的本地设计、实现、集成验收和旧代码清理已经完成。
 2. DONE：P4-1 已删除无权威性的 `player_snapshots`、刷盘队列及对应配置指标；玩家正式数据由业务事务直接持久化。
-3. DONE：P4-2 已补齐资产写后在线热状态同步、Redis 玩家归属、离线 `OnlineState` TTL、重连重新标记在线，以及 `StateMaintainer` 批量核对归属并清理运行时；跨节点顶号使用 Redis Pub/Sub 立即关闭指定旧连接，归属扫描继续作为丢消息兜底。
+3. DONE：P4-2 已补齐 Redis 玩家归属和 `StateMaintainer` 批量核对；跨节点顶号使用 Redis Pub/Sub 立即关闭指定旧连接，归属扫描继续作为丢消息兜底。无完整恢复价值的玩家基础内存快照已经删除。
 4. DONE：P4-3 已在连接关闭时清理对应 `RateLimiter` 键；通用 L1/CachedRepository 经评审无明确使用场景后删除，不增加后台扫描或缓存一致性链路。
 5. DONE：P4-4 已把状态变更协议统一接入 Dispatcher 近期结果缓存，覆盖重复请求、参数冲突、失败不缓存和玩家迁移清理；BattleService 不再保存重复的请求结果表。
 6. DONE：P4-5 已收敛为每连接单一有界 FIFO 队列，队列满即关闭对应慢客户端；删除未使用的消息优先级、Push 丢弃分支和指标，并补队列满测试。

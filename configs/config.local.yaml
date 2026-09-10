@@ -47,7 +47,6 @@ redis:
 
 state:
   offline_ttl_sec: 120
-  cleanup_interval_sec: 10
   owner_check_interval_sec: 5
   owner_ttl_sec: 120
 

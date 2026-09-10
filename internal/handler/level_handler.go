@@ -65,9 +65,6 @@ func (h *BizHandler) LevelSettle(ctx context.Context, targetUID string, payload 
 	if err != nil {
 		return nil, toBizError(err)
 	}
-	if result.Player != nil {
-		syncOnlinePlayerState(h.Online, *result.Player)
-	}
 	return map[string]interface{}{
 		"result": result,
 	}, nil

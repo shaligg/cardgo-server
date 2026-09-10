@@ -120,7 +120,7 @@ Client
                                                 +--> [globalcore: Friend/Chat/Guild/Mail/Rank/Notice domain core]
                                                 +--> [globalserver: same-process global jobs/service process boundary]
                                                 |
-                                                +--> [State: OnlineState memory]
+                                                +--> [Runtime: BattleSession/CommandCache]
                                                 |
                                                 +--> [Repository] --> [DB]
 ```
@@ -323,7 +323,7 @@ MVP:
 说明：
 
 - `battle/worker` 只代表“无状态战斗计算”候选，不包含局内连接、回合状态、推送逻辑。
-- `globalcore/*` 的接口、DTO 和核心规则必须按本地/远端复用约束编写，不能拿 `session`、`conn`、`OnlineState`。
+- `globalcore/*` 的接口、DTO 和核心规则必须按本地/远端复用约束编写，不能拿 `session`、`conn` 或 GameServer 私有运行态。
 - `RemoteClient` 不需要在 MVP 立即实现，但接口、DTO、幂等规则要从一开始稳定。
 - `LocalService` 和 `RemoteClient` 只能代表调用方式差异，不能各自复制一份业务规则。
 - 排行发奖、邮件附件生成、公会赛季奖励等公共规则应沉到 `globalcore/*`，由 `globalserver/*` 编排调用。
@@ -341,7 +341,7 @@ MVP:
 | `auth` | 游戏服验票 | 本地 |
 | `session` | 会话管理 | 本地 |
 | `dispatcher` | 玩家分片执行 | 本地 |
-| `state` | 在线热状态、TTL 清理、归属核对 | 本地 |
+| `state` | 玩家归属周期核对 | 本地 |
 | `game/player` | 玩家资料 | 本地 |
 | `game/asset` | 资产与资源流水 | 本地 |
 | `game/inventory` | 背包道具 | 本地 |
@@ -392,7 +392,7 @@ MVP:
 - “本地”不代表永远不能调整，而是当前实现不要预先做远程化结构。
 - `game/asset` 可暴露接口给 `globalserver` 发奖使用，但它本身仍是 GameServer 主业务模块。
 - `repo/cache/infra/gamedata` 属于可复用基础代码，不归类为可迁移业务模块。
-- `globalcore` 可以被 `game/*`、`globalserver/*` 和未来独立公共服共同引用；但不能反向依赖 `handler`、`gateway/ws`、`session`、`state.OnlineState`。
+- `globalcore` 可以被 `game/*`、`globalserver/*` 和未来独立公共服共同引用；但不能反向依赖 `handler`、`gateway/ws`、`session` 或 GameServer 私有运行态。
 
 实现原则：
 
@@ -456,7 +456,7 @@ MVP:
 | `gateway/ws` | 独立公共服不应该持有客户端连接 |
 | `session.Manager` | 公共服不能依赖玩家当前是否在线 |
 | `dispatcher` | 公共服 job 不走玩家分片执行器 |
-| `state.OnlineState` | 在线热状态属于 GameServer 本机内存 |
+| GameServer 私有运行态 | 局内状态和连接相关状态不能进入公共服 |
 | `game/battle` 局内内存态 | 战斗临时态不能成为公共服结算前置条件 |
 | `BizRouter` / `BizHandler` | 协议分发层不能反向进入公共服逻辑 |
 | 具体 `conn` / `client` 对象 | 公共服只产出结果，不直接推送连接 |
@@ -504,11 +504,11 @@ MVP:
 
 强制要求：
 
-1. `globalcore` 不能 import `handler`、`gateway/ws`、`session`、`state.OnlineState`。
+1. `globalcore` 不能 import `handler`、`gateway/ws`、`session` 或 GameServer 私有运行态模块。
 2. `globalserver` 不能读取 GameServer 私有内存，输入必须来自显式参数、DB 或 Redis。
 3. `LocalService` 与 `RemoteClient` 不允许复制两套业务规则；公共规则必须沉到 `globalcore`。
 4. 排行榜发奖这类公共规则放 `globalcore/rank`；排行榜赛季扫描、任务状态、重试和落库编排放 `globalserver/rank`。
-5. 发奖执行统一走 `game/asset` 接口，公共域模块不得直接修改玩家资产表或在线热状态。
+5. 发奖执行统一走 `game/asset` 接口，公共域模块不得直接修改玩家资产表或 GameServer 私有运行态。
 6. 可迁移接口的请求参数必须是 DTO 或基础类型，不能传 ORM 对象、连接对象、在线内存对象、事务外游离对象或模块内部结构体。
 7. DTO 字段必须显式表达业务含义、幂等键和版本信息，不能依赖调用方上下文隐式补齐。
 8. 如果某模块不在迁移白名单，默认按本地简单实现，不额外制造 remote/client/adapter。
@@ -534,9 +534,9 @@ MVP:
 - `economy` MVP 可先作为配置解析与工具函数，不一定单独成为复杂服务。
 
 ### 5.6 state
-- 在线热状态托管（仅 GameServer 内存）
-- 离线 TTL 清理与跨节点归属核对
-- 同节点断线恢复；跨节点从正式业务表重建
+- 定时触发 Redis 玩家归属核对
+- 清理已经迁移或离线归属过期玩家的局内状态和近期请求结果
+- Redis 查询失败时保留本机运行态，等待下一周期重试
 
 ### 5.7 repository
 - 纯数据库 CRUD、事务、批量写
@@ -672,21 +672,21 @@ MVP 固定使用 HMAC-SHA256：
 1. `Service` 完成业务判断，决定本次消耗、奖励和玩法状态变更。
 2. 涉及资产、领奖状态、购买次数、成长结果的 A 类写入，必须进入同一事务。
 3. 事务内由 `Service` 编排 `Cost/Reward` 写入器与领域 `Repository`；`Repository` 只负责表读写，不反向编排发奖或跨玩法业务。
-4. 事务提交成功后同步在线热状态；未来引入 `OnlinePlayerStore` 时再同步对应玩家聚合。
+4. 事务提交成功后返回最新业务结果；当前不维护玩家长期数据的进程内副本。
 5. 返回客户端。
 
 ### 7.4 断线流程
 1. 连接断开
 2. Session 标记离线
-3. 原 GameServer 按 `state.offline_ttl_sec` 保留在线热状态一段 TTL（当前默认 `120` 秒）
+3. 原 GameServer 通过 Redis 离线归属 TTL 保留短时重连窗口；这段时间内不主动删除该玩家的 `BattleSession` 和近期请求结果
 4. 关键 A 类数据在业务请求事务中已经写入正式表，断线时不再额外刷玩家快照
 5. 玩家重连时由 `Login/NodeAllocator` 决定分配到哪个 GameServer
 6. GameServer 验票并成功绑定会话后，原子更新 Redis 玩家归属 `uid -> server_id + conn_id`
-7. 如果 Redis 中的前一归属仍是本节点，优先恢复本机内存热状态
-8. 如果前一归属不是本节点或不存在，不复用本机旧状态，直接从 DB 重建长期状态
+7. 鉴权基础资料始终从正式玩家表加载；如果 Redis 中的前一归属仍是本节点，可继续使用尚未清理的 `BattleSession` 和近期请求结果
+8. 如果前一归属不是本节点或不存在，先删除本机残留的局内状态和近期请求结果，再从 DB 加载长期状态
 9. 如果前一归属是其他节点且带有旧 `conn_id`，新节点通过 Redis Pub/Sub 向旧节点发送定向顶号通知；旧节点只关闭 `uid + conn_id` 同时匹配的旧连接。GM 等主动踢人通知使用 UID 目标，不携带也不校验 `conn_id`；全服广播踢人使用 `all` 目标，由所有 GameServer 关闭各自节点的全部当前连接
-10. 原 GameServer 仍由 `StateMaintainer` 按 `state.owner_check_interval_sec`（当前默认 `5` 秒）批量核对 Redis 归属；发现玩家已迁移后清理 `OnlineState/BattleSession`，并为通知丢失提供兜底
-11. 离线归属和本机热状态另有 `120` 秒 TTL 兜底；Redis 查询失败时只记日志，不删除任何本机状态
+10. 原 GameServer 仍由 `StateMaintainer` 按 `state.owner_check_interval_sec`（当前默认 `5` 秒）批量核对 Redis 归属；发现玩家已迁移后清理 `BattleSession` 和近期请求结果，并为通知丢失提供兜底
+11. Redis 离线归属使用 `120` 秒 TTL 兜底；归属过期后维护循环清理对应局内状态，Redis 查询失败时只记日志，不删除任何本机状态
 
 ### 7.4.1 重连分配规则
 分配规则属于 `Login/NodeAllocator`，不写死在 GameServer。
@@ -710,10 +710,10 @@ MVP 固定使用 HMAC-SHA256：
 
 跨服重连规则：
 
-1. 新 GameServer 从 DB 读取玩家资料、资产、卡牌、卡组、工坊、关卡进度。
+1. 新 GameServer 从 DB 读取需要恢复的玩家长期数据。
 2. 不读取旧 GameServer 内存中的 `BattleSession`。
 3. 未结算局内状态视为中断，MVP 可按放弃或失败补偿处理。
-4. 新 GameServer 通过 Redis Pub/Sub 通知原节点立即关闭指定旧连接；原节点在下一轮 Redis 归属扫描中清理旧 `OnlineState/BattleSession`，TTL 作为最终异常兜底。
+4. 新 GameServer 通过 Redis Pub/Sub 通知原节点立即关闭指定旧连接；原节点在下一轮 Redis 归属扫描中清理旧 `BattleSession` 和近期请求结果，TTL 作为最终异常兜底。
 
 ### 7.4.2 session_id 与 conn_id 口径
 MVP 阶段不强制拆分 `session_id` 和 `conn_id`。
@@ -746,8 +746,8 @@ MVP: session_id == 当前连接 ID
 ```
 
 ### 7.5 在线状态持久化原则
-1. `OnlineState` 和 `BattleSession` 只保存在当前 GameServer 内存，不建立 `player_snapshots` 数据库表。
-2. 同节点短时重连优先复用内存；跨节点重连或进程重启时，通过正式 Repository 从玩家、背包、卡牌等业务表重建。
+1. 当前不保存玩家长期数据的进程内副本，也不建立 `player_snapshots` 数据库表；鉴权基础资料和普通业务查询直接读取正式业务表。
+2. `BattleSession` 只保存在当前 GameServer 内存；同节点短时重连可继续使用，跨节点重连或进程重启不恢复旧局内状态。
 3. 玩家资产、成长和玩法结算必须在对应业务请求事务中直接写入正式表，不能依赖断线刷盘保证正确性。
 4. 未结算局内状态属于可丢失临时态；未来确有跨节点恢复需求时，单独评估 Redis 房间态或完整 Actor 快照，不增加不完整的数据库副本。
 
@@ -842,15 +842,15 @@ Dispatcher 按 uid 串行
 5. 迁移策略：后续拆分服务时切换为 `Outbox + MQ`，不改事件契约
 
 ## 9. 运行态与数据分层
-### 9.1 在线热状态（GameServer 内存态）
-- 在线热状态不是读缓存，而是当前 GameServer 中正在运行的玩家/战斗/房间状态。
+### 9.1 GameServer 运行态
+- 当前运行态不是玩家业务读缓存，而是连接、战斗、房间等正在执行的临时状态。
 - 生命周期通常覆盖玩家在线期间或战斗/房间生命周期，不是单次请求局部变量。
-- 适合：当前连接玩家快照、战斗临时态、关卡局内状态、短期上下文。
-- 规则：业务成功后同步更新；权威数据由业务事务写 DB，在线状态本身不刷入数据库快照表。
+- 当前包括：`SessionManager`、`BattleSession`、`CommandCache` 和静态 `GameData`。
+- 权威玩家数据由业务事务直接写 DB，不维护不完整的玩家内存快照。
 
 ### 9.2 GameServer 专用内存结构
 - 当前不实现通用 L1 读缓存，单个玩家或展示对象按需查询 DB。
-- `OnlineState`、`BattleSession`、`CommandCache` 和 `GameData` 各自维护明确的运行态，不共用万能缓存容器。
+- `BattleSession`、`CommandCache` 和 `GameData` 各自维护明确的运行态，不共用万能缓存容器。
 - 未来 `OnlinePlayerStore` 只保存当前节点归属玩家的有界工作集，不能与通用读缓存重复保存同一份当前玩家数据。
 - 排行榜 TopN 等公共热点只有在监控确认访问瓶颈后，才由所属模块增加短 TTL 快照；完整榜单仍使用 Redis 共享数据。
 
@@ -878,7 +878,7 @@ Dispatcher 按 uid 串行
 
 规则：
 1. A类只能走 DB 事务权威写，不允许“仅内存后刷盘”。
-2. B类允许异步持久化，但必须带版本号或时间戳做覆盖保护；该规则不用于玩家 `OnlineState`。
+2. B类允许异步持久化，但必须带版本号或时间戳做覆盖保护。
 3. C类仅保留在内存或 Redis，进程重启可丢弃。
 
 ### 9.7 普通写请求的近期防重复
@@ -1168,7 +1168,7 @@ MVP 至少需要以下业务表：
 - 启动时 Redis 连接或首次节点注册失败，GameServer 启动失败
 - 运行中节点列表读取失败时 LoginService 返回错误，不使用静态节点旁路
 - 新连接写入玩家归属失败时拒绝建立游戏会话，避免多个节点同时持有有效状态
-- 已在线玩家继续服务；归属查询失败时保留本机热状态，不因“查不到”误清理
+- 已在线玩家继续服务；归属查询失败时保留连接、局内状态和近期请求结果，不因“查不到”误清理
 - 节点心跳失败只记录错误，下一周期继续上报；Redis 恢复后自动重新注册，无需重启 GameServer
 - 当前 nonce/session 未使用 Redis，不为尚不存在的远端实现增加熔断或降级代码
 
@@ -1290,7 +1290,6 @@ go_game_server/
 │   │   ├── session/
 │   │   │   └── manager.go
 │   │   ├── state/
-│   │   │   ├── online_state.go
 │   │   │   └── maintainer.go
 │   ├── game/
 │   │   ├── player/
@@ -1467,7 +1466,6 @@ redis:
 
 state:
   offline_ttl_sec: 120
-  cleanup_interval_sec: 10
   owner_check_interval_sec: 5
   owner_ttl_sec: 120
 
@@ -1887,7 +1885,7 @@ type GlobalJobResult struct {
 约束：
 
 1. 所有写入型接口必须携带 `JobID`、`SettlementID` 或同等幂等键。
-2. 接口参数不能包含 `session`、`conn`、`OnlineState`、`BattleSession` 等 GameServer 私有运行时对象。
+2. 接口参数不能包含 `session`、`conn`、`BattleSession` 等 GameServer 私有运行时对象。
 3. 返回值只描述任务结果，不直接承诺已推送到客户端。
 4. 需要客户端感知时，通过邮件、奖励记录、登录同步、普通业务推送等方式完成。
 5. 未来独立部署时，transport 层只做协议转换，不改变接口语义。
@@ -2280,14 +2278,10 @@ sequenceDiagram
             GW-->>C: server_full
         else 通过
             SM-->>GW: accepted + old_session_id(optional)
-            GW->>SR: Restore(uid, server_id)
-            alt 本机存在短线热状态
-                SR-->>GW: resync(from memory OnlineState/BattleSession)
-            else 本机无热状态
-                SR->>DB: Load authoritative player state
-                DB-->>SR: player/assets/cards/deck/workshop/progress
-                SR-->>GW: resync(from DB, no old BattleSession)
-            end
+            GW->>SR: BuildAuthResync(uid)
+            SR->>DB: Load player core
+            DB-->>SR: uid/level/gold
+            SR-->>GW: basic resync from DB
             GW->>MT: IncWSAuthSuccess / SetWSConnections
             GW-->>C: auth_ack(ok, uid, session_id, resync?)
         end
@@ -2344,7 +2338,6 @@ sequenceDiagram
     participant SVC as PlayerService
     participant REPO as Repository
     participant DB as DB
-    participant ST as OnlineState
     participant MT as Metrics
     participant AS as AssetService
 
@@ -2363,7 +2356,6 @@ sequenceDiagram
     REPO->>DB: tx(player.gold + asset_log(req_id))
     DB-->>REPO: committed + latest player
     REPO-->>SVC: player
-    SVC->>ST: upsert online state(version++)
     SVC-->>H: biz result
     H-->>BR: biz result
     BR-->>DIS: biz result
@@ -2426,8 +2418,7 @@ sequenceDiagram
 3. `bizDispatcher -> dispatcher`：按 `uid` 路由到固定分片串行执行。
 4. `dispatcher -> bizRouter -> module Handler`：按 `op_code` 找到具体模块协议处理函数。
 5. `module Handler -> service -> repository -> db`：完成业务规则和事务写入。
-6. `module Handler -> OnlineState`：事务成功后同步更新本机在线热状态。
-7. `dispatcher -> bizDispatcher -> gateway/ws -> Client`：返回 `biz_ack` 或 `error`。
+6. `dispatcher -> bizDispatcher -> gateway/ws -> Client`：返回 `biz_ack` 或 `error`。
 
 ### 20.4 断线重连
 ```mermaid
@@ -2439,13 +2430,13 @@ sequenceDiagram
     participant NG as New GameServer
     participant R as Redis PlayerOwner
     participant S as Session
-    participant ST as State
+    participant RT as BattleSession/CommandCache
     participant DB as DB
 
     C-xOG: disconnect
     OG->>S: mark offline_pending
     OG->>R: shorten owner TTL if server_id+conn_id match
-    OG->>ST: keep OnlineState/BattleSession with TTL
+    Note over OG,RT: owner TTL 有效期间不主动删除局内状态和近期请求结果
 
     C->>L: POST /api/login(reconnect)
     L->>R: read last server_id
@@ -2456,8 +2447,10 @@ sequenceDiagram
         C->>OG: auth_req(ticket)
         OG->>S: rebind uid->new conn
         OG->>R: claim owner after auth
-        OG->>ST: restore memory OnlineState/BattleSession
-        OG-->>C: auth_ack + resync(from memory)
+        OG->>DB: load player core
+        DB-->>OG: uid/level/gold
+        OG-->>C: auth_ack + basic resync(from DB)
+        Note over C,RT: 客户端保留原 level_session_id 时可继续旧 BattleSession
     else 分配到新 GameServer
         L-->>C: ticket(server_id=new)
         C->>NG: auth_req(ticket)
@@ -2466,11 +2459,11 @@ sequenceDiagram
         NG->>R: publish kick(uid, old_conn_id) to old server
         R-->>OG: kick old connection notice
         OG-->>C: close old connection
-        NG->>DB: load authoritative player state
-        DB-->>NG: profile/assets/cards/deck/workshop/progress
-        NG-->>C: auth_ack + resync(from DB, no old battle)
+        NG->>DB: load player core
+        DB-->>NG: uid/level/gold
+        NG-->>C: auth_ack + basic resync(from DB, no old battle)
         OG->>R: batch check owner on existing state loop
-        OG->>ST: owner changed, clear old OnlineState/BattleSession
+        OG->>RT: owner changed, clear old BattleSession/CommandCache
     end
 ```
 

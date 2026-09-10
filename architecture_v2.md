@@ -56,7 +56,7 @@
 - 登录模块当前同进程实现，但接口按独立登录服务设计。
 - 一旦扩展为多个 GameServer，先把 Login 拆成单独进程；不采用“每个 GameServer 都内置一个 Login”的部署方式。
 - 业务模块按服务边界写，后续可平滑拆分。
-- 高频在线热状态可以在本机内存。
+- 战斗、房间等高频局内状态可以保存在本机内存。
 - 玩家权威数据必须在 DB。
 - Redis 当前用于 GameServer 节点注册、玩家节点归属和少量跨节点控制通知；ticket nonce 与连接 Session 暂存在各 GameServer 进程内存。
 
@@ -187,7 +187,7 @@ globalserver/* 是公共服编排层，MVP 就可以有代码，但不独立启�
 - 如果 `globalcore/*` 的请求期逻辑未来需要跨多个 GameServer 实时统一状态、独立扩容、故障隔离或独立 SLA，再将 Local 实现替换为 RemoteClient。
 - game 可以调用 globalcore 接口，但不能直接操作 globalcore 的内部表、map、Redis key 或 ZSET。
 - 初版 `globalserver/*` 由 GameServer 同进程直调；未来拆分时再补 `cmd/globalserver` 和传输层。
-- `globalserver/*` 可以复用 `globalcore/*` 规则和 `game/asset` 发奖接口，但不能依赖连接、session、在线热状态。
+- `globalserver/*` 可以复用 `globalcore/*` 规则和 `game/asset` 发奖接口，但不能依赖连接、session 或 GameServer 私有运行态。
 - 只有需要或未来可能迁移的模块才按可远程化方式实现，不把所有本地业务强行套成 service/client/adapter。
 - 强依赖连接、在线内存、局内状态、单玩家高频轻逻辑的业务，优先保持 GameServer 本地内聚。
 - 可迁移模块以技术文档中的“可迁移模块列表”为准；列表外默认简单本地实现。
@@ -236,9 +236,9 @@ Gateway / Transport
 
 ```text
 GameServer 本机内存
-  - 在线热状态
+  - 当前连接与会话状态
   - 局内临时状态
-  - 短时间断线恢复状态
+  - 近期请求结果
 
 Redis 共享状态
   - GameServer 节点注册
@@ -258,7 +258,7 @@ DB 持久化数据
 权威规则：
 
 - 玩家资产、卡牌、背包、工坊、关卡进度以 DB 为准。
-- GameServer 内存只做在线热状态和局内临时状态。
+- GameServer 内存只保存连接会话、局内临时状态和近期请求结果，不保存不完整的玩家长期数据副本。
 - 跨服重连不恢复旧服内存态，只从 DB 重建长期状态。
 
 ## 9. 登录与重连原则
@@ -292,7 +292,8 @@ GameServer 只做：
 ```text
 验证 ticket.server_id 是否等于自己
 验票成功后建立 session
-根据本机是否有热状态决定恢复方式
+从正式业务表加载鉴权基础资料
+同节点短时重连可继续使用尚未清理的局内状态
 ```
 
 重连规则：
@@ -300,10 +301,10 @@ GameServer 只做：
 - 优先分配回原 GameServer。
 - Login 从 Redis 玩家归属读取最近节点，但不在签发 ticket 时改写归属。
 - GameServer 验票并绑定会话成功后，才原子更新 Redis `uid -> server_id + conn_id`。
-- 如果 Redis 前一归属仍是本节点，可恢复本机内存热状态；否则不复用旧状态，只从 DB 重建长期数据。
+- 玩家长期数据始终从 DB 加载；如果 Redis 前一归属仍是本节点，可继续使用本机尚未清理的 `BattleSession` 和近期请求结果。
 - 如果前一归属是其他节点，新 GameServer 通过 Redis Pub/Sub 通知原节点立即关闭指定旧连接；通知必须携带旧 `conn_id`，避免延迟消息误踢新会话。
-- 原 GameServer 仍通过状态维护循环每 `5` 秒批量核对归属并清理已迁移玩家的 `OnlineState/BattleSession`，作为 Pub/Sub 丢消息的兜底。
-- 离线状态和归属保留 `120` 秒，作为原节点重连窗口与最终异常兜底；Redis 不转发玩家业务请求。
+- 原 GameServer 仍通过状态维护循环每 `5` 秒批量核对归属并清理已迁移玩家的 `BattleSession` 和近期请求结果，作为 Pub/Sub 丢消息的兜底。
+- Redis 离线归属保留 `120` 秒，作为原节点重连窗口与最终异常兜底；Redis 不转发玩家业务请求。
 
 详细流程见：
 

@@ -11,37 +11,28 @@ type OwnerReconciler interface {
 	ReconcileOwners(ctx context.Context)
 }
 
-// MaintainerOptions 配置内存状态清理和跨节点归属核对周期。
+// MaintainerOptions 配置跨节点归属核对周期。
 type MaintainerOptions struct {
-	CleanupInterval    time.Duration
 	OwnerCheckInterval time.Duration
 	OwnerReconciler    OwnerReconciler
 }
 
-// Maintainer 定期清理过期内存状态，并核对跨节点玩家归属。
+// Maintainer 定期核对跨节点玩家归属。
 type Maintainer struct {
-	online             *OnlineState
-	cleanupInterval    time.Duration
 	ownerCheckInterval time.Duration
 	ownerReconciler    OwnerReconciler
-	lastCleanup        time.Time
 	lastOwnerCheck     time.Time
 	stopOnce           sync.Once
 	stopCh             chan struct{}
 	doneCh             chan struct{}
 }
 
-// NewMaintainer 创建本机在线状态维护器。
-func NewMaintainer(online *OnlineState, opts MaintainerOptions) *Maintainer {
-	if opts.CleanupInterval <= 0 {
-		opts.CleanupInterval = time.Minute
-	}
+// NewMaintainer 创建玩家归属维护器。
+func NewMaintainer(opts MaintainerOptions) *Maintainer {
 	if opts.OwnerCheckInterval <= 0 {
 		opts.OwnerCheckInterval = 5 * time.Second
 	}
 	return &Maintainer{
-		online:             online,
-		cleanupInterval:    opts.CleanupInterval,
 		ownerCheckInterval: opts.OwnerCheckInterval,
 		ownerReconciler:    opts.OwnerReconciler,
 		stopCh:             make(chan struct{}),
@@ -54,7 +45,7 @@ func (m *Maintainer) Start() {
 	go func() {
 		defer close(m.doneCh)
 		m.maintain(context.Background(), time.Now())
-		ticker := time.NewTicker(minDuration(m.cleanupInterval, m.ownerCheckInterval))
+		ticker := time.NewTicker(m.ownerCheckInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -83,15 +74,4 @@ func (m *Maintainer) maintain(ctx context.Context, now time.Time) {
 		m.ownerReconciler.ReconcileOwners(ctx)
 		m.lastOwnerCheck = now
 	}
-	if m.online != nil && (m.lastCleanup.IsZero() || now.Sub(m.lastCleanup) >= m.cleanupInterval) {
-		m.online.DeleteExpired(now)
-		m.lastCleanup = now
-	}
-}
-
-func minDuration(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
 }

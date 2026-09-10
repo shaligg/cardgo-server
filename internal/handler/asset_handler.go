@@ -7,7 +7,6 @@ import (
 	"github.com/bigfish/go_orm_1/internal/contract/protocol"
 	terrors "github.com/bigfish/go_orm_1/internal/framework/transport/errors"
 	assetsvc "github.com/bigfish/go_orm_1/internal/game/asset"
-	"github.com/bigfish/go_orm_1/internal/platform/state"
 )
 
 // AssetGrantItem 处理调试环境发放道具协议。
@@ -20,7 +19,6 @@ func (h *BizHandler) AssetGrantItem(ctx context.Context, targetUID string, paylo
 	if err != nil {
 		return nil, toBizError(err)
 	}
-	syncAssetPlayerChanges(h.Online, res)
 	return map[string]interface{}{
 		"changes": res,
 	}, nil
@@ -36,18 +34,9 @@ func (h *BizHandler) AssetConsumeItem(ctx context.Context, targetUID string, pay
 	if err != nil {
 		return nil, toBizError(err)
 	}
-	syncAssetPlayerChanges(h.Online, res)
 	return map[string]interface{}{
 		"changes": res,
 	}, nil
-}
-
-func syncAssetPlayerChanges(online *state.OnlineState, changes []assetsvc.ChangeResult) {
-	for _, change := range changes {
-		if change.Player != nil {
-			syncOnlinePlayerState(online, *change.Player)
-		}
-	}
 }
 
 // AssetGetInventory 处理通用背包查询协议。
