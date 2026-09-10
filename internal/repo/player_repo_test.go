@@ -153,49 +153,34 @@ func TestChangeInventoryItemInsufficientDoesNotWriteSideEffects(t *testing.T) {
 	}
 }
 
-func TestUpgradeCardInTxWithGoldCostIsAtomic(t *testing.T) {
+func TestCardRepositoryReadsAndUpdatesCalculatedCardInTx(t *testing.T) {
 	repo, db := newTestPlayerRepo(t)
 	ctx := context.Background()
 	if err := repo.EnsureDefaultCards(ctx, "u1", []int64{10001}); err != nil {
 		t.Fatalf("EnsureDefaultCards: %v", err)
 	}
-	if _, err := repo.ChangeGold(ctx, "u1", 100, 1, "test.grant", "gold-r1"); err != nil {
-		t.Fatalf("grant gold: %v", err)
-	}
 
 	var card PlayerCard
-	var playerAfterUpgrade Player
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
-		playerAfterUpgrade, err = repo.ChangeGoldInTx(ctx, tx, "u1", -50, 1, "card.upgrade", "card-r1")
+		card, err = repo.GetCardInTx(ctx, tx, "u1", 10001)
 		if err != nil {
 			return err
 		}
-		card, err = repo.UpgradeCardInTx(ctx, tx, "u1", 10001, 5)
-		return err
+		card.Level++
+		return repo.UpdateCardInTx(ctx, tx, card)
 	})
 	if err != nil {
-		t.Fatalf("upgrade transaction returned error: %v", err)
+		t.Fatalf("update card transaction returned error: %v", err)
 	}
 	if card.Level != 2 {
 		t.Fatalf("card level = %d, want 2", card.Level)
 	}
-	if playerAfterUpgrade.Gold != 50 {
-		t.Fatalf("player gold in result = %d, want 50", playerAfterUpgrade.Gold)
-	}
-	player, err := repo.GetByUID(ctx, "u1")
+	cards, err := repo.GetCards(ctx, "u1")
 	if err != nil {
-		t.Fatalf("GetByUID: %v", err)
+		t.Fatalf("GetCards: %v", err)
 	}
-	if player.Gold != 50 {
-		t.Fatalf("gold = %d, want 50", player.Gold)
-	}
-
-	var upgradeLogCount int64
-	if err := db.Model(&model.AssetLog{}).Where("uid = ? AND reason = ? AND req_id = ?", "u1", "card.upgrade", "card-r1").Count(&upgradeLogCount).Error; err != nil {
-		t.Fatalf("count upgrade asset logs: %v", err)
-	}
-	if upgradeLogCount != 1 {
-		t.Fatalf("upgrade asset log count = %d, want 1", upgradeLogCount)
+	if len(cards) != 1 || cards[0].Level != 2 {
+		t.Fatalf("stored cards = %+v, want level 2", cards)
 	}
 }

@@ -123,18 +123,22 @@ func (s Service) UpgradeCard(ctx context.Context, uid string, cardID int64, reqI
 	if err := s.Repo.EnsureDefaultCards(ctx, uid, s.defaultCardIDs()); err != nil {
 		return UpgradeResult{}, err
 	}
-	current, err := s.findOwnedCard(ctx, uid, cardID)
-	if err != nil {
-		return UpgradeResult{}, err
-	}
-	if current.Level >= MaxCardLevel {
-		return UpgradeResult{}, repo.ErrCardMaxLevel
-	}
-
-	costs := s.upgradeCosts(cardConfig, current.Level)
+	var costs []asset.CostItem
 	var card repo.PlayerCard
 	var player *repo.Player
 	if err := s.Tx.Do(ctx, func(tx *gorm.DB) error {
+		current, err := s.Repo.GetCardInTx(ctx, tx, uid, cardID)
+		if err != nil {
+			return err
+		}
+		if current.Count <= 0 {
+			return repo.ErrCardNotOwned
+		}
+		if current.Level >= MaxCardLevel {
+			return repo.ErrCardMaxLevel
+		}
+
+		costs = s.upgradeCosts(cardConfig, current.Level)
 		results, err := s.Assets.ApplyCostInTx(ctx, tx, uid, costs, "card.upgrade", reqID)
 		if err != nil {
 			return err
@@ -145,8 +149,12 @@ func (s Service) UpgradeCard(ctx context.Context, uid string, cardID int64, reqI
 				break
 			}
 		}
-		card, err = s.Repo.UpgradeCardInTx(ctx, tx, uid, cardID, MaxCardLevel)
-		return err
+		current.Level++
+		if err := s.Repo.UpdateCardInTx(ctx, tx, current); err != nil {
+			return err
+		}
+		card = current
+		return nil
 	}); err != nil {
 		return UpgradeResult{}, err
 	}
@@ -188,19 +196,6 @@ func (s Service) validateOwnedCards(ctx context.Context, uid string, cardIDs []i
 		seen[cardID] = true
 	}
 	return nil
-}
-
-func (s Service) findOwnedCard(ctx context.Context, uid string, cardID int64) (repo.PlayerCard, error) {
-	cards, err := s.Repo.GetCards(ctx, uid)
-	if err != nil {
-		return repo.PlayerCard{}, err
-	}
-	for _, card := range cards {
-		if card.CardID == cardID && card.Count > 0 {
-			return card, nil
-		}
-	}
-	return repo.PlayerCard{}, repo.ErrCardNotOwned
 }
 
 func (s Service) defaultCardIDs() []int64 {

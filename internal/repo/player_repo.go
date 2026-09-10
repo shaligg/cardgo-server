@@ -216,24 +216,8 @@ func (r *DBPlayerRepository) SaveDeck(ctx context.Context, uid string, deckID in
 	return toDomainPlayerDeck(row)
 }
 
-// UpgradeCard 在事务中提升玩家卡牌等级。
-//
-// 资产扣费由上层 CardService 通过 asset.Service 完成，本方法只处理卡牌数据。
-func (r *DBPlayerRepository) UpgradeCard(ctx context.Context, uid string, cardID int64, maxLevel int) (PlayerCard, error) {
-	var out PlayerCard
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		out, err = r.UpgradeCardInTx(ctx, tx, uid, cardID, maxLevel)
-		return err
-	})
-	if err != nil {
-		return PlayerCard{}, err
-	}
-	return out, nil
-}
-
-// UpgradeCardInTx 在外部事务中提升玩家卡牌等级。
-func (r *DBPlayerRepository) UpgradeCardInTx(ctx context.Context, tx *gorm.DB, uid string, cardID int64, maxLevel int) (PlayerCard, error) {
+// GetCardInTx 在外部事务中查询玩家指定卡牌。
+func (r *DBPlayerRepository) GetCardInTx(ctx context.Context, tx *gorm.DB, uid string, cardID int64) (PlayerCard, error) {
 	if tx == nil {
 		return PlayerCard{}, fmt.Errorf("transaction is nil")
 	}
@@ -245,14 +229,29 @@ func (r *DBPlayerRepository) UpgradeCardInTx(ctx context.Context, tx *gorm.DB, u
 	if err != nil {
 		return PlayerCard{}, fmt.Errorf("query player card: %w", err)
 	}
-	if row.Level >= maxLevel {
-		return PlayerCard{}, ErrCardMaxLevel
-	}
-	row.Level++
-	if err := tx.WithContext(ctx).Save(&row).Error; err != nil {
-		return PlayerCard{}, fmt.Errorf("save player card: %w", err)
-	}
 	return toDomainPlayerCard(row), nil
+}
+
+// UpdateCardInTx 保存业务层已经计算完成的卡牌数据。
+func (r *DBPlayerRepository) UpdateCardInTx(ctx context.Context, tx *gorm.DB, card PlayerCard) error {
+	if tx == nil {
+		return fmt.Errorf("transaction is nil")
+	}
+	result := tx.WithContext(ctx).
+		Model(&model.PlayerCard{}).
+		Where("uid = ? AND card_id = ?", card.UID, card.CardID).
+		Updates(map[string]interface{}{
+			"level": card.Level,
+			"exp":   card.Exp,
+			"count": card.Count,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("update player card: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrCardNotOwned
+	}
+	return nil
 }
 
 // getOrCreate 在当前事务中查询或创建玩家默认数据。

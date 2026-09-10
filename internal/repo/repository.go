@@ -216,11 +216,11 @@ type PlayerDeck struct {
 // CardRepository 定义卡牌库存与卡组的持久化能力。
 type CardRepository interface {
 	GetCards(ctx context.Context, uid string) ([]PlayerCard, error)
+	GetCardInTx(ctx context.Context, tx *gorm.DB, uid string, cardID int64) (PlayerCard, error)
 	GetDeck(ctx context.Context, uid string, deckID int32) (PlayerDeck, error)
 	EnsureDefaultCards(ctx context.Context, uid string, cardIDs []int64) error
 	SaveDeck(ctx context.Context, uid string, deckID int32, name string, cardIDs []int64) (PlayerDeck, error)
-	UpgradeCard(ctx context.Context, uid string, cardID int64, maxLevel int) (PlayerCard, error)
-	UpgradeCardInTx(ctx context.Context, tx *gorm.DB, uid string, cardID int64, maxLevel int) (PlayerCard, error)
+	UpdateCardInTx(ctx context.Context, tx *gorm.DB, card PlayerCard) error
 }
 
 // PlayerWorkshop 是业务层使用的玩家工坊基础数据。
