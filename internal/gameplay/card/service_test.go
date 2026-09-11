@@ -103,7 +103,7 @@ func TestSaveDeckStoresLegalDeck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveDeck returned error: %v", err)
 	}
-	if deck.DeckID != DefaultDeckID || len(deck.CardIDs) != 3 || deck.CardIDs[2] != 10003 {
+	if deck.DeckID != DefaultDeckID || !deck.IsActive || len(deck.CardIDs) != 3 || deck.CardIDs[2] != 10003 {
 		t.Fatalf("deck = %+v, want saved deck", deck)
 	}
 	retry, err := svc.SaveDeck(context.Background(), "u1", DefaultDeckID, "main", []int64{10001, 10002, 10003}, "deck-r1")

@@ -43,9 +43,6 @@ var ErrCardNotOwned = errors.New("card not owned")
 // ErrDeckNotFound 表示目标卡组不存在。
 var ErrDeckNotFound = errors.New("deck not found")
 
-// ErrCardMaxLevel 表示卡牌已经达到当前版本等级上限。
-var ErrCardMaxLevel = errors.New("card already max level")
-
 // ErrFacilityMaxLevel 表示设施已经达到当前版本等级上限。
 var ErrFacilityMaxLevel = errors.New("facility already max level")
 
@@ -204,8 +201,8 @@ type CardRepository interface {
 	GetCards(ctx context.Context, uid string) ([]PlayerCard, error)
 	GetCardInTx(ctx context.Context, tx *gorm.DB, uid string, cardID int64) (PlayerCard, error)
 	GetDeck(ctx context.Context, uid string, deckID int32) (PlayerDeck, error)
-	EnsureDefaultCards(ctx context.Context, uid string, cardIDs []int64) error
-	SaveDeck(ctx context.Context, uid string, deckID int32, name string, cardIDs []int64) (PlayerDeck, error)
+	CreateCardsIfAbsent(ctx context.Context, cards []PlayerCard) error
+	SaveDeck(ctx context.Context, deck PlayerDeck) (PlayerDeck, error)
 	UpdateCardInTx(ctx context.Context, tx *gorm.DB, card PlayerCard) error
 }
 

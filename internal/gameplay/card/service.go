@@ -29,6 +29,8 @@ var (
 	ErrCardNotFound = errors.New("card not found")
 	// ErrInvalidDeck 表示卡组数量、重复卡或未拥有卡牌不合法。
 	ErrInvalidDeck = errors.New("invalid deck")
+	// ErrCardMaxLevel 表示卡牌已经达到当前版本等级上限。
+	ErrCardMaxLevel = errors.New("card already max level")
 )
 
 // Service 是卡牌模块应用服务。
@@ -61,7 +63,7 @@ func (s Service) GetCards(ctx context.Context, uid string) (CardsResult, error) 
 	if err := s.ensureReady(); err != nil {
 		return CardsResult{}, err
 	}
-	if err := s.Repo.EnsureDefaultCards(ctx, uid, s.defaultCardIDs()); err != nil {
+	if err := s.ensureDefaultCards(ctx, uid); err != nil {
 		return CardsResult{}, err
 	}
 	cards, err := s.Repo.GetCards(ctx, uid)
@@ -97,13 +99,19 @@ func (s Service) SaveDeck(ctx context.Context, uid string, deckID int32, name st
 	if len(cardIDs) == 0 || len(cardIDs) > DefaultDeckSize {
 		return repo.PlayerDeck{}, fmt.Errorf("%w: card count must be 1-%d", ErrInvalidDeck, DefaultDeckSize)
 	}
-	if err := s.Repo.EnsureDefaultCards(ctx, uid, s.defaultCardIDs()); err != nil {
+	if err := s.ensureDefaultCards(ctx, uid); err != nil {
 		return repo.PlayerDeck{}, err
 	}
 	if err := s.validateOwnedCards(ctx, uid, cardIDs); err != nil {
 		return repo.PlayerDeck{}, err
 	}
-	return s.Repo.SaveDeck(ctx, uid, deckID, name, cardIDs)
+	return s.Repo.SaveDeck(ctx, repo.PlayerDeck{
+		UID:      uid,
+		DeckID:   deckID,
+		Name:     name,
+		CardIDs:  cardIDs,
+		IsActive: deckID == DefaultDeckID,
+	})
 }
 
 // UpgradeCard 提升卡牌等级。
@@ -120,7 +128,7 @@ func (s Service) UpgradeCard(ctx context.Context, uid string, cardID int64, reqI
 	if !ok {
 		return UpgradeResult{}, fmt.Errorf("%w: %d", ErrCardNotFound, cardID)
 	}
-	if err := s.Repo.EnsureDefaultCards(ctx, uid, s.defaultCardIDs()); err != nil {
+	if err := s.ensureDefaultCards(ctx, uid); err != nil {
 		return UpgradeResult{}, err
 	}
 	var costs []asset.CostItem
@@ -135,7 +143,7 @@ func (s Service) UpgradeCard(ctx context.Context, uid string, cardID int64, reqI
 			return repo.ErrCardNotOwned
 		}
 		if current.Level >= MaxCardLevel {
-			return repo.ErrCardMaxLevel
+			return ErrCardMaxLevel
 		}
 
 		costs = s.upgradeCosts(cardConfig, current.Level)
@@ -196,6 +204,16 @@ func (s Service) validateOwnedCards(ctx context.Context, uid string, cardIDs []i
 		seen[cardID] = true
 	}
 	return nil
+}
+
+// ensureDefaultCards 根据策划配置构造新玩家的初始卡牌，仓储只负责幂等落库。
+func (s Service) ensureDefaultCards(ctx context.Context, uid string) error {
+	cardIDs := s.defaultCardIDs()
+	cards := make([]repo.PlayerCard, 0, len(cardIDs))
+	for _, cardID := range cardIDs {
+		cards = append(cards, repo.PlayerCard{UID: uid, CardID: cardID, Level: 1, Count: 1})
+	}
+	return s.Repo.CreateCardsIfAbsent(ctx, cards)
 }
 
 func (s Service) defaultCardIDs() []int64 {

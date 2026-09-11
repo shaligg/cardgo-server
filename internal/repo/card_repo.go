@@ -47,28 +47,40 @@ func (r *DBCardRepository) GetDeck(ctx context.Context, uid string, deckID int32
 	return toDomainPlayerDeck(row)
 }
 
-// EnsureDefaultCards 为新玩家补齐初始卡牌，重复调用不会增加卡牌数量。
-func (r *DBCardRepository) EnsureDefaultCards(ctx context.Context, uid string, cardIDs []int64) error {
-	if len(cardIDs) == 0 {
+// CreateCardsIfAbsent 幂等创建业务层已经准备好的玩家卡牌数据。
+func (r *DBCardRepository) CreateCardsIfAbsent(ctx context.Context, cards []PlayerCard) error {
+	if len(cards) == 0 {
 		return nil
 	}
-	rows := make([]model.PlayerCard, 0, len(cardIDs))
-	for _, cardID := range cardIDs {
-		rows = append(rows, model.PlayerCard{UID: uid, CardID: cardID, Level: 1, Count: 1})
+	rows := make([]model.PlayerCard, 0, len(cards))
+	for _, card := range cards {
+		rows = append(rows, model.PlayerCard{
+			UID:    card.UID,
+			CardID: card.CardID,
+			Level:  card.Level,
+			Exp:    card.Exp,
+			Count:  card.Count,
+		})
 	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "uid"}, {Name: "card_id"}}, DoNothing: true,
 	}).Create(&rows).Error
 }
 
-// SaveDeck 保存玩家卡组。
-func (r *DBCardRepository) SaveDeck(ctx context.Context, uid string, deckID int32, name string, cardIDs []int64) (PlayerDeck, error) {
-	cardIDsJSON, err := json.Marshal(cardIDs)
+// SaveDeck 保存业务层已经校验并计算完成的玩家卡组。
+func (r *DBCardRepository) SaveDeck(ctx context.Context, deck PlayerDeck) (PlayerDeck, error) {
+	cardIDsJSON, err := json.Marshal(deck.CardIDs)
 	if err != nil {
 		return PlayerDeck{}, fmt.Errorf("marshal deck card_ids: %w", err)
 	}
-	row := model.PlayerDeck{UID: uid, DeckID: deckID, Name: name, CardIDsJSON: string(cardIDsJSON), IsActive: deckID == 1}
-	if err := r.db.WithContext(ctx).Where("uid = ? AND deck_id = ?", uid, deckID).Assign(row).FirstOrCreate(&row).Error; err != nil {
+	row := model.PlayerDeck{
+		UID:         deck.UID,
+		DeckID:      deck.DeckID,
+		Name:        deck.Name,
+		CardIDsJSON: string(cardIDsJSON),
+		IsActive:    deck.IsActive,
+	}
+	if err := r.db.WithContext(ctx).Where("uid = ? AND deck_id = ?", deck.UID, deck.DeckID).Assign(row).FirstOrCreate(&row).Error; err != nil {
 		return PlayerDeck{}, fmt.Errorf("save player deck: %w", err)
 	}
 	return toDomainPlayerDeck(row)
