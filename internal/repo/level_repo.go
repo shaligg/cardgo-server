@@ -18,9 +18,6 @@ func (r *DBLevelProgressRepository) GetLevelProgressInTx(ctx context.Context, tx
 	if tx == nil {
 		return PlayerLevelProgress{}, fmt.Errorf("transaction is nil")
 	}
-	if uid == "" || levelID <= 0 {
-		return PlayerLevelProgress{}, fmt.Errorf("invalid level progress uid=%s level_id=%d", uid, levelID)
-	}
 
 	var row model.PlayerLevelProgress
 	if err := tx.WithContext(ctx).Where("uid = ? AND level_id = ?", uid, levelID).Take(&row).Error; err != nil {
@@ -37,10 +34,7 @@ func (r *DBLevelProgressRepository) CreateLevelProgressInTx(ctx context.Context,
 	if tx == nil {
 		return fmt.Errorf("transaction is nil")
 	}
-	row, err := levelProgressModel(progress)
-	if err != nil {
-		return err
-	}
+	row := levelProgressModel(progress)
 	if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
 		return fmt.Errorf("create level progress: %w", err)
 	}
@@ -52,10 +46,7 @@ func (r *DBLevelProgressRepository) UpdateLevelProgressInTx(ctx context.Context,
 	if tx == nil {
 		return fmt.Errorf("transaction is nil")
 	}
-	row, err := levelProgressModel(progress)
-	if err != nil {
-		return err
-	}
+	row := levelProgressModel(progress)
 	result := tx.WithContext(ctx).
 		Model(&model.PlayerLevelProgress{}).
 		Where("uid = ? AND level_id = ?", progress.UID, progress.LevelID).
@@ -73,17 +64,14 @@ func (r *DBLevelProgressRepository) UpdateLevelProgressInTx(ctx context.Context,
 	return nil
 }
 
-func levelProgressModel(progress PlayerLevelProgress) (model.PlayerLevelProgress, error) {
-	if progress.UID == "" || progress.LevelID <= 0 || progress.ClearCount <= 0 {
-		return model.PlayerLevelProgress{}, fmt.Errorf("invalid level progress uid=%s level_id=%d clear_count=%d", progress.UID, progress.LevelID, progress.ClearCount)
-	}
+func levelProgressModel(progress PlayerLevelProgress) model.PlayerLevelProgress {
 	return model.PlayerLevelProgress{
 		UID:            progress.UID,
 		LevelID:        progress.LevelID,
 		ClearCount:     progress.ClearCount,
 		FirstClearedAt: time.Unix(progress.FirstClearedAt, 0),
 		LastClearedAt:  time.Unix(progress.LastClearedAt, 0),
-	}, nil
+	}
 }
 
 func toDomainPlayerLevelProgress(row model.PlayerLevelProgress) PlayerLevelProgress {
