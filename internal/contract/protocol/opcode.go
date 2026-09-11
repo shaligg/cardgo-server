@@ -19,6 +19,7 @@ const (
 	OpLevelStart    int32 = 1301
 	OpLevelPlayCard int32 = 1302
 	OpLevelSettle   int32 = 1303
+	OpLevelEndTurn  int32 = 1304
 
 	OpWorkshopGetOverview     int32 = 1401
 	OpWorkshopUpgradeFacility int32 = 1402

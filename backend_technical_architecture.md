@@ -1773,6 +1773,7 @@ type CardService interface {
 type LevelService interface {
 	StartLevel(ctx context.Context, uid string, levelID int32, reqID string) (LevelSession, error)
 	PlayCard(ctx context.Context, uid string, sessionID string, cardID int32, target string, reqID string) (BattleState, error)
+	EndTurn(ctx context.Context, uid string, sessionID string, reqID string) (LevelSession, error)
 	SettleLevel(ctx context.Context, uid string, sessionID string, reqID string) (LevelSettleResult, error)
 }
 
@@ -2220,6 +2221,7 @@ MVP 只使用协议 Envelope 中的业务心跳，不再额外维护一套 WebSo
 | 1301 | `level.start` | M1 | 开始关卡 |
 | 1302 | `level.play_card` | M1/M2 | 局内出牌 |
 | 1303 | `level.settle` | M1 | 结算关卡 |
+| 1304 | `level.end_turn` | M1 | 结束当前回合 |
 | 1401 | `workshop.get_overview` | M3 | 查询工坊总览 |
 | 1402 | `workshop.upgrade_facility` | M3 | 升级设施 |
 | 1403 | `workshop.claim_offline_reward` | M3 | 领取离线收益 |
@@ -2303,6 +2305,7 @@ router.RegisterCached(protocol.OpCardUpgrade, cardHandler.Upgrade)
 
 router.RegisterCached(protocol.OpLevelStart, levelHandler.Start)
 router.RegisterCached(protocol.OpLevelPlayCard, levelHandler.PlayCard)
+router.RegisterCached(protocol.OpLevelEndTurn, levelHandler.EndTurn)
 router.RegisterCached(protocol.OpLevelSettle, levelHandler.Settle)
 ```
 
@@ -2610,6 +2613,13 @@ sequenceDiagram
     LS-->>GW: BattleState
     GW-->>C: biz_ack(battle_state)
 
+	C->>GW: biz_req(envelope.op_code=1304 level.end_turn, payload={session_id,req_id})
+	GW->>DIS: route by uid
+	DIS->>LS: EndTurn(uid, session_id, req_id)
+	LS->>BS: AdvanceTurnOrFail
+	LS-->>GW: LevelSession
+	GW-->>C: biz_ack(session)
+
     C->>GW: biz_req(envelope.op_code=1303 level.settle, payload={session_id,req_id})
     GW->>DIS: route by uid
     DIS->>LS: SettleLevel(uid, session_id, req_id)
@@ -2636,6 +2646,9 @@ sequenceDiagram
 6. `BattleService` 自身仍以 `settleResult` 保证同一局内会话只结算一次，这是局内状态约束，不是通用网络重试缓存。
 7. 如果结算已成功，客户端在近期窗口内重复请求由 Dispatcher 直接返回首次结果，不得再次发奖。
 8. BattleSession 的 UID 索引、单局限制和替换规则统一遵循 8.1 节，不在本流程重复定义。
+9. 出牌先校验并扣除卡牌 `cost`；卡牌效果执行失败时，行动点与其他局内状态均不变。
+10. 结束普通回合时回合数加一并按关卡配置恢复行动点；结束最后一回合且目标未完成时进入失败终态。
+11. 失败局不能继续出牌或成功结算，但可以被下一次 `level.start` 替换。
 
 ### 20.6 MVP 工坊升级链路
 ```mermaid

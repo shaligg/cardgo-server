@@ -33,8 +33,14 @@ var (
 	ErrCardNotInSession = errors.New("card not in level session")
 	// ErrInsufficientResource 表示资源转换时局内资源不足。
 	ErrInsufficientResource = errors.New("insufficient battle resource")
+	// ErrInsufficientActionPoint 表示当前回合行动点不足，不能打出卡牌。
+	ErrInsufficientActionPoint = errors.New("insufficient action point")
 	// ErrLevelNotComplete 表示关卡目标尚未完成，不能结算。
 	ErrLevelNotComplete = errors.New("level goal not complete")
+	// ErrLevelAlreadyComplete 表示关卡目标已经完成，应直接发起结算。
+	ErrLevelAlreadyComplete = errors.New("level goal already complete")
+	// ErrLevelFailed 表示关卡已经失败，不能继续操作或成功结算。
+	ErrLevelFailed = errors.New("level failed")
 	// ErrBattleInProgress 表示玩家已有一局尚未结算的关卡。
 	ErrBattleInProgress = errors.New("battle already in progress")
 )
@@ -54,6 +60,7 @@ type LevelSession struct {
 	UID             string           `json:"uid"`
 	LevelID         int64            `json:"level_id"`
 	Turn            int              `json:"turn"`
+	TurnLimit       int              `json:"turn_limit"`
 	ActionPoint     int              `json:"action_point"`
 	GoalType        string           `json:"goal_type"`
 	GoalTarget      int64            `json:"goal_target"`
@@ -62,6 +69,7 @@ type LevelSession struct {
 	HandCards       []int64          `json:"hand_cards"`
 	ActiveOrders    []OrderState     `json:"active_orders"`
 	Settled         bool             `json:"settled"`
+	Failed          bool             `json:"failed"`
 }
 
 // PlayCardResult 是打出卡牌后的局内状态。
@@ -126,6 +134,7 @@ func (s *Service) StartLevel(ctx context.Context, uid string, levelID int64, req
 			UID:         uid,
 			LevelID:     levelID,
 			Turn:        1,
+			TurnLimit:   level.TurnLimit,
 			ActionPoint: level.ActionPointPerTurn,
 			GoalType:    level.Goal.GoalType,
 			GoalTarget:  level.Goal.Target,
@@ -167,13 +176,52 @@ func (s *Service) PlayCard(ctx context.Context, uid string, sessionID string, ca
 	if rs.state.Settled {
 		return PlayCardResult{Session: cloneSession(rs.state), CardID: cardID}, nil
 	}
+	if rs.state.Failed {
+		return PlayCardResult{}, ErrLevelFailed
+	}
+	if card.Cost > rs.state.ActionPoint {
+		return PlayCardResult{}, ErrInsufficientActionPoint
+	}
 	nextState := cloneSession(rs.state)
+	nextState.ActionPoint -= card.Cost
 	if err := applyCardEffects(&nextState, card); err != nil {
 		return PlayCardResult{}, err
 	}
 	rs.state = nextState
 	s.completeReadyOrders(rs)
 	return PlayCardResult{Session: cloneSession(rs.state), CardID: cardID}, nil
+}
+
+// EndTurn 结束当前回合。普通回合进入下一回合并恢复行动点，最后一回合结束时判定失败。
+func (s *Service) EndTurn(ctx context.Context, uid string, sessionID string, reqID string) (LevelSession, error) {
+	_ = ctx
+	if reqID == "" {
+		return LevelSession{}, ErrInvalidReqID
+	}
+	rs, err := s.lockSession(uid, sessionID)
+	if err != nil {
+		return LevelSession{}, err
+	}
+	defer rs.mu.Unlock()
+
+	if rs.state.Settled {
+		return cloneSession(rs.state), nil
+	}
+	if rs.state.Failed {
+		return cloneSession(rs.state), nil
+	}
+	if rs.state.CompletedOrders >= rs.level.Goal.Target {
+		return LevelSession{}, ErrLevelAlreadyComplete
+	}
+	if rs.state.Turn >= rs.level.TurnLimit {
+		rs.state.Failed = true
+		rs.state.ActionPoint = 0
+		return cloneSession(rs.state), nil
+	}
+
+	rs.state.Turn++
+	rs.state.ActionPoint = rs.level.ActionPointPerTurn
+	return cloneSession(rs.state), nil
 }
 
 // SettleLevel 结算关卡并发放奖励。
@@ -191,6 +239,9 @@ func (s *Service) SettleLevel(ctx context.Context, uid string, sessionID string,
 	defer rs.mu.Unlock()
 	if rs.settleResult != nil {
 		return *rs.settleResult, nil
+	}
+	if rs.state.Failed {
+		return LevelSettleResult{}, ErrLevelFailed
 	}
 	if rs.state.CompletedOrders < rs.level.Goal.Target {
 		return LevelSettleResult{}, ErrLevelNotComplete
@@ -296,7 +347,7 @@ func (s *Service) storeSession(uid string, next *runtimeSession) error {
 			current.mu.Unlock()
 			continue
 		}
-		if !current.state.Settled {
+		if !current.state.Settled && !current.state.Failed {
 			current.mu.Unlock()
 			return ErrBattleInProgress
 		}

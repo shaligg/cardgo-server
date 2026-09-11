@@ -65,7 +65,8 @@ func isNotFoundError(err error) bool {
 func isInsufficientResourceError(err error) bool {
 	return errors.Is(err, assetsvc.ErrInsufficientGold) ||
 		errors.Is(err, assetsvc.ErrInsufficientItem) ||
-		errors.Is(err, battlesvc.ErrInsufficientResource)
+		errors.Is(err, battlesvc.ErrInsufficientResource) ||
+		errors.Is(err, battlesvc.ErrInsufficientActionPoint)
 }
 
 func isAlreadyMaxError(err error) bool {
@@ -75,6 +76,8 @@ func isAlreadyMaxError(err error) bool {
 
 func isPreconditionFailedError(err error) bool {
 	return errors.Is(err, battlesvc.ErrLevelNotComplete) ||
+		errors.Is(err, battlesvc.ErrLevelAlreadyComplete) ||
+		errors.Is(err, battlesvc.ErrLevelFailed) ||
 		errors.Is(err, battlesvc.ErrBattleInProgress) ||
 		errors.Is(err, globalcore.ErrFriendRequestExists) ||
 		errors.Is(err, globalcore.ErrAlreadyFriends) ||

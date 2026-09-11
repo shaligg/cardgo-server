@@ -49,6 +49,7 @@ func NewRegisteredRouter(h *BizHandler, enableDebugOps bool) *Router {
 
 	router.RegisterCached(protocol.OpLevelStart, h.LevelStart)
 	router.RegisterCached(protocol.OpLevelPlayCard, h.LevelPlayCard)
+	router.RegisterCached(protocol.OpLevelEndTurn, h.LevelEndTurn)
 	router.RegisterCached(protocol.OpLevelSettle, h.LevelSettle)
 
 	router.Register(protocol.OpWorkshopGetOverview, h.WorkshopGetOverview)

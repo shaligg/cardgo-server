@@ -57,6 +57,12 @@ type LevelSettleRequest struct {
 	ReqID          string `json:"req_id,omitempty"`
 }
 
+type LevelEndTurnRequest struct {
+	LevelSessionID string `json:"level_session_id,omitempty"`
+	SessionID      string `json:"session_id,omitempty"`
+	ReqID          string `json:"req_id,omitempty"`
+}
+
 type WorkshopUpgradeFacilityRequest struct {
 	FacilityID string `json:"facility_id,omitempty"`
 	ReqID      string `json:"req_id,omitempty"`

@@ -48,6 +48,28 @@ func (h *BizHandler) LevelPlayCard(ctx context.Context, targetUID string, payloa
 	}, nil
 }
 
+// LevelEndTurn 处理关卡结束回合协议。
+func (h *BizHandler) LevelEndTurn(ctx context.Context, targetUID string, payload json.RawMessage) (interface{}, *terrors.BizError) {
+	var req protocol.LevelEndTurnRequest
+	if len(payload) == 0 || json.Unmarshal(payload, &req) != nil {
+		return nil, &terrors.BizError{Code: terrors.CodeBadRequest, Msg: "invalid level_end_turn payload"}
+	}
+	sessionID := req.LevelSessionID
+	if sessionID == "" {
+		sessionID = req.SessionID
+	}
+	if h.BattleService == nil {
+		return nil, &terrors.BizError{Code: terrors.CodeInternal, Msg: "battle service is nil"}
+	}
+	session, err := h.BattleService.EndTurn(ctx, targetUID, sessionID, req.ReqID)
+	if err != nil {
+		return nil, toBizError(err)
+	}
+	return map[string]interface{}{
+		"session": session,
+	}, nil
+}
+
 // LevelSettle 处理关卡结算协议。
 func (h *BizHandler) LevelSettle(ctx context.Context, targetUID string, payload json.RawMessage) (interface{}, *terrors.BizError) {
 	var req protocol.LevelSettleRequest

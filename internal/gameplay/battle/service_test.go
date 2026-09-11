@@ -213,9 +213,90 @@ func TestPlayCardFailureDoesNotReserveReqID(t *testing.T) {
 	if current := svc.sessions["u1"].state.Resources["bread"]; current != 0 {
 		t.Fatalf("failed PlayCard left partial state, bread = %d", current)
 	}
+	if current := svc.sessions["u1"].state.ActionPoint; current != 3 {
+		t.Fatalf("failed PlayCard consumed action point, got %d want 3", current)
+	}
 
 	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, "play-1"); err != nil {
 		t.Fatalf("retry after failed PlayCard: %v", err)
+	}
+}
+
+func TestPlayCardConsumesActionPoint(t *testing.T) {
+	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
+	session, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("StartLevel: %v", err)
+	}
+	// 提高测试局目标，避免完成首个订单后影响行动点边界验证。
+	svc.sessions["u1"].level.Goal.Target = 99
+	svc.sessions["u1"].state.GoalTarget = 99
+
+	for want := 2; want >= 0; want-- {
+		result, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, "play")
+		if err != nil {
+			t.Fatalf("PlayCard returned error: %v", err)
+		}
+		if result.Session.ActionPoint != want {
+			t.Fatalf("action_point = %d, want %d", result.Session.ActionPoint, want)
+		}
+	}
+
+	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, "play"); !errors.Is(err, ErrInsufficientActionPoint) {
+		t.Fatalf("PlayCard error = %v, want ErrInsufficientActionPoint", err)
+	}
+	if current := svc.sessions["u1"].state.ActionPoint; current != 0 {
+		t.Fatalf("rejected PlayCard changed action point to %d", current)
+	}
+}
+
+func TestEndTurnAdvancesAndFailsAfterFinalTurn(t *testing.T) {
+	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
+	session, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("StartLevel: %v", err)
+	}
+
+	for wantTurn := 2; wantTurn <= 3; wantTurn++ {
+		current, err := svc.EndTurn(context.Background(), "u1", session.SessionID, "end-turn")
+		if err != nil {
+			t.Fatalf("EndTurn returned error: %v", err)
+		}
+		if current.Turn != wantTurn || current.ActionPoint != 3 || current.Failed {
+			t.Fatalf("unexpected turn state: %+v", current)
+		}
+	}
+
+	failed, err := svc.EndTurn(context.Background(), "u1", session.SessionID, "end-final-turn")
+	if err != nil {
+		t.Fatalf("final EndTurn returned error: %v", err)
+	}
+	if !failed.Failed || failed.Turn != 3 || failed.ActionPoint != 0 {
+		t.Fatalf("unexpected failed state: %+v", failed)
+	}
+	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, "play-after-fail"); !errors.Is(err, ErrLevelFailed) {
+		t.Fatalf("PlayCard error = %v, want ErrLevelFailed", err)
+	}
+	if _, err := svc.SettleLevel(context.Background(), "u1", session.SessionID, "settle-after-fail"); !errors.Is(err, ErrLevelFailed) {
+		t.Fatalf("SettleLevel error = %v, want ErrLevelFailed", err)
+	}
+	if _, err := svc.StartLevel(context.Background(), "u1", 1, "restart-after-fail"); err != nil {
+		t.Fatalf("StartLevel after failure returned error: %v", err)
+	}
+}
+
+func TestEndTurnRejectsCompletedLevel(t *testing.T) {
+	svc := newTestBattleService(t, &fakePlayerRepo{}, &fakeInventoryRepo{})
+	session, err := svc.StartLevel(context.Background(), "u1", 1, "start-1")
+	if err != nil {
+		t.Fatalf("StartLevel: %v", err)
+	}
+	if _, err := svc.PlayCard(context.Background(), "u1", session.SessionID, 10001, "play-1"); err != nil {
+		t.Fatalf("PlayCard: %v", err)
+	}
+
+	if _, err := svc.EndTurn(context.Background(), "u1", session.SessionID, "end-turn"); !errors.Is(err, ErrLevelAlreadyComplete) {
+		t.Fatalf("EndTurn error = %v, want ErrLevelAlreadyComplete", err)
 	}
 }
 

@@ -74,3 +74,17 @@ func TestRegisterBizRoutesIncludesLightSocialOps(t *testing.T) {
 		}
 	}
 }
+
+func TestRegisterBizRoutesIncludesBattleTurnOps(t *testing.T) {
+	router := NewRegisteredRouter(&BizHandler{}, false)
+	for _, opCode := range []int32{
+		protocol.OpLevelStart,
+		protocol.OpLevelPlayCard,
+		protocol.OpLevelEndTurn,
+		protocol.OpLevelSettle,
+	} {
+		if _, ok := router.handlers[opCode]; !ok {
+			t.Fatalf("battle op_code %d is not registered", opCode)
+		}
+	}
+}

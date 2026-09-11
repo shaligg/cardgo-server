@@ -21,8 +21,10 @@ func TestToBizErrorMapsExpectedClientCodes(t *testing.T) {
 		{name: "bad request", err: repo.ErrInvalidReqID, code: terrors.CodeBadRequest},
 		{name: "not found", err: repo.ErrCardNotOwned, code: terrors.CodeNotFound},
 		{name: "insufficient", err: assetsvc.ErrInsufficientGold, code: terrors.CodeInsufficient},
+		{name: "insufficient action point", err: battlesvc.ErrInsufficientActionPoint, code: terrors.CodeInsufficient},
 		{name: "already max", err: cardsvc.ErrCardMaxLevel, code: terrors.CodeAlreadyMax},
 		{name: "precondition", err: battlesvc.ErrLevelNotComplete, code: terrors.CodePreconditionFailed},
+		{name: "level failed", err: battlesvc.ErrLevelFailed, code: terrors.CodePreconditionFailed},
 		{name: "battle in progress", err: battlesvc.ErrBattleInProgress, code: terrors.CodePreconditionFailed},
 		{name: "server config missing", err: cardsvc.ErrGameDataMissing, code: terrors.CodeInternal},
 	}
