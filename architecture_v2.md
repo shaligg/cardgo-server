@@ -16,7 +16,7 @@
 
 - [backend_technical_architecture.md](/Users/bigfish/Project/go_orm_1/backend_technical_architecture.md)
 
-落地任务拆分放在：
+已有基础架构落地记录放在：
 
 - [architecture_v2_task_breakdown.md](/Users/bigfish/Project/go_orm_1/architecture_v2_task_breakdown.md)
 
@@ -35,7 +35,7 @@
 技术细节文档：
 
 - [后端技术架构设计](/Users/bigfish/Project/go_orm_1/backend_technical_architecture.md)
-- [架构落地任务拆分](/Users/bigfish/Project/go_orm_1/architecture_v2_task_breakdown.md)
+- [基础架构落地记录](/Users/bigfish/Project/go_orm_1/architecture_v2_task_breakdown.md)
 
 ## 3. 架构结论
 
@@ -420,6 +420,6 @@ MVP 不做：
 
 - 项目级边界变化，改本文档。
 - 技术流程、协议、时序、数据层、压测变化，改 [backend_technical_architecture.md](/Users/bigfish/Project/go_orm_1/backend_technical_architecture.md)。
-- 开发顺序、任务拆分、验收项变化，改 [architecture_v2_task_breakdown.md](/Users/bigfish/Project/go_orm_1/architecture_v2_task_breakdown.md)。
+- 新功能的开发顺序、任务拆分和验收项写入对应功能策划文档；`architecture_v2_task_breakdown.md` 不再追加玩法任务。
 - 玩法规则变化，改 `docs/` 下对应策划文档。
 - 不在总览文档或策划文档复制协议号、接口签名、目录清单、数据表清单等技术细节，只引用权威文档。

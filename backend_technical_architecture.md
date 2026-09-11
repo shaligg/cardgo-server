@@ -16,7 +16,7 @@
 
 - [architecture_v2.md](/Users/bigfish/Project/go_orm_1/architecture_v2.md)：项目级后端架构总览。
 - [backend_technical_architecture.md](/Users/bigfish/Project/go_orm_1/backend_technical_architecture.md)：后端技术架构细节，也就是本文档。
-- [architecture_v2_task_breakdown.md](/Users/bigfish/Project/go_orm_1/architecture_v2_task_breakdown.md)：架构落地任务拆分。
+- [architecture_v2_task_breakdown.md](/Users/bigfish/Project/go_orm_1/architecture_v2_task_breakdown.md)：基础架构与 Prototype 主链路落地记录。
 
 ## 0. 本期范围引用（MVP）
 本文档不维护玩法数量、关卡数量、卡牌数量、设施数量等产品范围细节。
@@ -43,7 +43,7 @@
 - 方法：先模块化单体，后续按瓶颈平滑拆分。
 - 实现策略：同进程部署、按多服务边界编码（接口先行），优先交付可用 Demo。
 - 业务目标：支撑卡牌休闲游戏 MVP 主链路，即登录、建号、进入关卡、完成订单、结算奖励、卡牌成长、工坊成长。
-- 执行拆分清单见：[architecture_v2_task_breakdown.md](/Users/bigfish/Project/go_orm_1/architecture_v2_task_breakdown.md)
+- 既有基础架构落地记录见：[architecture_v2_task_breakdown.md](/Users/bigfish/Project/go_orm_1/architecture_v2_task_breakdown.md)
 
 ## 2. 架构结论
 1. 形态：模块化单体（非微服务），一个 `GameServer` 进程承载实时链路。
