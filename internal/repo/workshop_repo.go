@@ -8,9 +8,8 @@ import (
 
 	"github.com/bigfish/go_orm_1/internal/repo/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
-
-const defaultWorkshopThemeID = "default"
 
 // DBWorkshopRepository 是基于 GORM 的工坊仓储。
 type DBWorkshopRepository struct {
@@ -22,28 +21,31 @@ func NewDBWorkshopRepository(db *gorm.DB) *DBWorkshopRepository {
 	return &DBWorkshopRepository{db: db}
 }
 
-// GetOrCreateWorkshop 查询玩家工坊基础数据；不存在时创建默认工坊。
-func (r *DBWorkshopRepository) GetOrCreateWorkshop(ctx context.Context, uid string) (PlayerWorkshop, error) {
+// GetWorkshop 查询玩家工坊基础数据，不在读路径隐式创建默认数据。
+func (r *DBWorkshopRepository) GetWorkshop(ctx context.Context, uid string) (PlayerWorkshop, error) {
 	var row model.PlayerWorkshop
 	err := r.db.WithContext(ctx).Where("uid = ?", uid).Take(&row).Error
 	if err == nil {
 		return toDomainPlayerWorkshop(row), nil
 	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return PlayerWorkshop{}, fmt.Errorf("query player workshop: %w", err)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return PlayerWorkshop{}, ErrPlayerWorkshopNotFound
 	}
+	return PlayerWorkshop{}, fmt.Errorf("query player workshop: %w", err)
+}
 
-	now := time.Now()
-	row = model.PlayerWorkshop{
-		UID:                 uid,
-		Level:               1,
-		ActiveThemeID:       defaultWorkshopThemeID,
-		LastOfflineRewardAt: now,
+// CreateWorkshopIfAbsent 幂等创建业务层给出的默认工坊，并返回最终数据。
+func (r *DBWorkshopRepository) CreateWorkshopIfAbsent(ctx context.Context, workshop PlayerWorkshop) (PlayerWorkshop, error) {
+	row := model.PlayerWorkshop{
+		UID:                 workshop.UID,
+		Level:               workshop.Level,
+		ActiveThemeID:       workshop.ActiveThemeID,
+		LastOfflineRewardAt: time.Unix(workshop.LastOfflineRewardAt, 0),
 	}
-	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
+	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
 		return PlayerWorkshop{}, fmt.Errorf("create player workshop: %w", err)
 	}
-	return toDomainPlayerWorkshop(row), nil
+	return r.GetWorkshop(ctx, workshop.UID)
 }
 
 // GetFacilities 查询玩家已有设施数据。
@@ -133,50 +135,21 @@ func playerFacilityModel(facility PlayerFacility) (model.PlayerFacility, error) 
 	return row, nil
 }
 
-// RecordOfflineRewardClaim 记录离线收益领取结果，并在有可结算时推进结算时间。
-func (r *DBWorkshopRepository) RecordOfflineRewardClaim(ctx context.Context, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error) {
-	var out OfflineRewardClaim
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var err error
-		out, err = r.RecordOfflineRewardClaimInTx(ctx, tx, uid, claim)
-		return err
-	})
-	if err != nil {
-		return OfflineRewardClaim{}, err
-	}
-	return out, nil
-}
-
-// RecordOfflineRewardClaimInTx 在外部事务中记录离线收益领取结果。
-func (r *DBWorkshopRepository) RecordOfflineRewardClaimInTx(ctx context.Context, tx *gorm.DB, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error) {
+// UpdateLastOfflineRewardAtInTx 保存业务层已经决定推进的离线收益领取时间。
+func (r *DBWorkshopRepository) UpdateLastOfflineRewardAtInTx(ctx context.Context, tx *gorm.DB, uid string, claimedAt int64) error {
 	if tx == nil {
-		return OfflineRewardClaim{}, fmt.Errorf("transaction is nil")
+		return fmt.Errorf("transaction is nil")
 	}
-
-	if claim.EffectiveSeconds > 0 {
-		var row model.PlayerWorkshop
-		err := tx.WithContext(ctx).Where("uid = ?", uid).Take(&row).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			row = model.PlayerWorkshop{
-				UID:                 uid,
-				Level:               1,
-				ActiveThemeID:       defaultWorkshopThemeID,
-				LastOfflineRewardAt: time.Unix(claim.ClaimedAt, 0),
-			}
-			if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
-				return OfflineRewardClaim{}, fmt.Errorf("create player workshop: %w", err)
-			}
-		} else if err != nil {
-			return OfflineRewardClaim{}, fmt.Errorf("query player workshop: %w", err)
-		} else {
-			row.LastOfflineRewardAt = time.Unix(claim.ClaimedAt, 0)
-			if err := tx.WithContext(ctx).Save(&row).Error; err != nil {
-				return OfflineRewardClaim{}, fmt.Errorf("save player workshop: %w", err)
-			}
-		}
+	result := tx.WithContext(ctx).Model(&model.PlayerWorkshop{}).
+		Where("uid = ?", uid).
+		Update("last_offline_reward_at", time.Unix(claimedAt, 0))
+	if result.Error != nil {
+		return fmt.Errorf("update player workshop offline reward time: %w", result.Error)
 	}
-
-	return claim, nil
+	if result.RowsAffected == 0 {
+		return ErrPlayerWorkshopNotFound
+	}
+	return nil
 }
 
 func toDomainPlayerWorkshop(m model.PlayerWorkshop) PlayerWorkshop {

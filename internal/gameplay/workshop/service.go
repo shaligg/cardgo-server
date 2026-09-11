@@ -21,6 +21,7 @@ const (
 	maxOfflineRewardSeconds    int64 = 14400
 	baseOfflineGoldPerHour     int64 = 20
 	baseOfflineMaterialPerHour int64 = 1
+	defaultWorkshopThemeID           = "default"
 )
 
 var (
@@ -97,7 +98,7 @@ func (s Service) GetOverview(ctx context.Context, uid string) (Overview, error) 
 	if s.Repo == nil {
 		return Overview{}, fmt.Errorf("workshop repository is nil")
 	}
-	workshop, err := s.Repo.GetOrCreateWorkshop(ctx, uid)
+	workshop, err := s.getOrCreateWorkshop(ctx, uid)
 	if err != nil {
 		return Overview{}, err
 	}
@@ -193,7 +194,7 @@ func (s Service) ClaimOfflineReward(ctx context.Context, uid string, reqID strin
 	if reqID == "" {
 		return OfflineRewardClaimResult{}, repo.ErrInvalidReqID
 	}
-	workshop, err := s.Repo.GetOrCreateWorkshop(ctx, uid)
+	workshop, err := s.getOrCreateWorkshop(ctx, uid)
 	if err != nil {
 		return OfflineRewardClaimResult{}, err
 	}
@@ -201,18 +202,12 @@ func (s Service) ClaimOfflineReward(ctx context.Context, uid string, reqID strin
 	if err != nil {
 		return OfflineRewardClaimResult{}, err
 	}
-	claim := repo.OfflineRewardClaim{
-		UID:              uid,
-		OfflineSeconds:   preview.OfflineSeconds,
-		EffectiveSeconds: effectiveOfflineSeconds(preview.OfflineSeconds),
-		Gold:             preview.Gold,
-		BasicMaterial:    preview.BasicMaterial,
-		ClaimedAt:        s.now().Unix(),
-	}
+	effectiveSeconds := effectiveOfflineSeconds(preview.OfflineSeconds)
+	claimedAt := s.now().Unix()
+	rewards := offlineRewardItems(preview.Gold, preview.BasicMaterial)
 
 	var player *repo.Player
 	if err := s.Tx.Do(ctx, func(tx *gorm.DB) error {
-		rewards := offlineRewardItems(claim)
 		if len(rewards) > 0 {
 			results, err := s.Assets.ApplyRewardInTx(ctx, tx, uid, rewards, "workshop.claim_offline_reward", reqID)
 			if err != nil {
@@ -225,13 +220,40 @@ func (s Service) ClaimOfflineReward(ctx context.Context, uid string, reqID strin
 				}
 			}
 		}
-		var err error
-		claim, err = s.Repo.RecordOfflineRewardClaimInTx(ctx, tx, uid, claim)
-		return err
+		if effectiveSeconds > 0 {
+			return s.Repo.UpdateLastOfflineRewardAtInTx(ctx, tx, uid, claimedAt)
+		}
+		return nil
 	}); err != nil {
 		return OfflineRewardClaimResult{}, err
 	}
-	return s.buildClaimResult(ctx, claim, player)
+	return OfflineRewardClaimResult{
+		UID:              uid,
+		OfflineSeconds:   preview.OfflineSeconds,
+		EffectiveSeconds: effectiveSeconds,
+		Gold:             preview.Gold,
+		Rewards:          rewards,
+		Player:           player,
+		ClaimedAt:        claimedAt,
+		Preview:          preview,
+	}, nil
+}
+
+// getOrCreateWorkshop 由工坊领域提供默认值，Repository 只负责幂等落库。
+func (s Service) getOrCreateWorkshop(ctx context.Context, uid string) (repo.PlayerWorkshop, error) {
+	workshop, err := s.Repo.GetWorkshop(ctx, uid)
+	if err == nil {
+		return workshop, nil
+	}
+	if !errors.Is(err, repo.ErrPlayerWorkshopNotFound) {
+		return repo.PlayerWorkshop{}, err
+	}
+	return s.Repo.CreateWorkshopIfAbsent(ctx, repo.PlayerWorkshop{
+		UID:                 uid,
+		Level:               1,
+		ActiveThemeID:       defaultWorkshopThemeID,
+		LastOfflineRewardAt: s.now().Unix(),
+	})
 }
 
 func (s Service) buildUpgradeResult(facility repo.PlayerFacility, costs []asset.CostItem) FacilityUpgradeResult {
@@ -278,38 +300,13 @@ func (s Service) buildOfflineRewardPreview(ctx context.Context, workshop repo.Pl
 	return preview, nil
 }
 
-func (s Service) buildClaimResult(ctx context.Context, claim repo.OfflineRewardClaim, player *repo.Player) (OfflineRewardClaimResult, error) {
-	if player == nil && claim.Gold > 0 && s.Players != nil {
-		current, err := s.Players.GetByUID(ctx, claim.UID)
-		if err != nil {
-			return OfflineRewardClaimResult{}, err
-		}
-		player = &current
-	}
-	rewards := offlineRewardItems(claim)
-	return OfflineRewardClaimResult{
-		UID:              claim.UID,
-		OfflineSeconds:   claim.OfflineSeconds,
-		EffectiveSeconds: claim.EffectiveSeconds,
-		Gold:             claim.Gold,
-		Rewards:          rewards,
-		Player:           player,
-		ClaimedAt:        claim.ClaimedAt,
-		Preview: OfflineRewardPreview{
-			OfflineSeconds: claim.OfflineSeconds,
-			Gold:           claim.Gold,
-			BasicMaterial:  claim.BasicMaterial,
-		},
-	}, nil
-}
-
-func offlineRewardItems(claim repo.OfflineRewardClaim) []asset.RewardItem {
+func offlineRewardItems(gold int64, basicMaterial int64) []asset.RewardItem {
 	rewards := []asset.RewardItem{}
-	if claim.Gold > 0 {
-		rewards = append(rewards, asset.RewardItem{ItemID: gamedata.ItemIDGold, Count: claim.Gold})
+	if gold > 0 {
+		rewards = append(rewards, asset.RewardItem{ItemID: gamedata.ItemIDGold, Count: gold})
 	}
-	if claim.BasicMaterial > 0 {
-		rewards = append(rewards, asset.RewardItem{ItemID: gamedata.ItemIDBasicMaterial, Count: claim.BasicMaterial})
+	if basicMaterial > 0 {
+		rewards = append(rewards, asset.RewardItem{ItemID: gamedata.ItemIDBasicMaterial, Count: basicMaterial})
 	}
 	return rewards
 }

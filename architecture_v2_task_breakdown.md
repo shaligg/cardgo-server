@@ -387,6 +387,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 18. DONE：将原 `internal/game` 按职责拆为 `internal/domain` 与 `internal/gameplay`；只调整目录和依赖口径，不改变协议、业务逻辑或事务边界。
 19. DONE：按业务聚合拆分数据库实现：`DBPlayerRepository` 只保留玩家资料，资产、卡牌/卡组、关卡进度、工坊、好友、公会和聊天分别使用独立 Repository；数据库迁移改为包级 `repo.Migrate`，不保留旧万能仓储兼容入口。
 20. DONE：收口资产层职责：`AssetService` 统一计算余额并判断资产不足，`DBAssetRepository` 只执行事务内读取、保存和资产流水写入；单项与多项资产变更统一由 Service 管理事务。
+21. DONE：收口工坊层职责：默认工坊和离线收益领取规则统一由 `WorkshopService` 决定，`DBWorkshopRepository` 只负责查询、幂等创建及保存最终状态，并删除未使用的独立领取事务入口。
 
 目标：
 

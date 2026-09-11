@@ -52,6 +52,9 @@ var ErrFacilityMaxLevel = errors.New("facility already max level")
 // ErrPlayerFacilityNotFound 表示玩家还没有目标设施数据。
 var ErrPlayerFacilityNotFound = errors.New("player facility not found")
 
+// ErrPlayerWorkshopNotFound 表示玩家还没有工坊基础数据。
+var ErrPlayerWorkshopNotFound = errors.New("player workshop not found")
+
 // ErrLevelProgressNotFound 表示玩家还没有目标关卡的进度记录。
 var ErrLevelProgressNotFound = errors.New("level progress not found")
 
@@ -214,16 +217,6 @@ type PlayerWorkshop struct {
 	LastOfflineRewardAt int64  `json:"last_offline_reward_at"`
 }
 
-// OfflineRewardClaim 是业务层使用的离线收益领取结果。
-type OfflineRewardClaim struct {
-	UID              string `json:"uid"`
-	OfflineSeconds   int64  `json:"offline_seconds"`
-	EffectiveSeconds int64  `json:"effective_seconds"`
-	Gold             int64  `json:"gold"`
-	BasicMaterial    int64  `json:"basic_material"`
-	ClaimedAt        int64  `json:"claimed_at"`
-}
-
 // PlayerFacility 是业务层使用的玩家工坊设施数据。
 type PlayerFacility struct {
 	UID        string `json:"uid"`
@@ -235,11 +228,11 @@ type PlayerFacility struct {
 
 // WorkshopRepository 定义工坊总览需要的持久化能力。
 type WorkshopRepository interface {
-	GetOrCreateWorkshop(ctx context.Context, uid string) (PlayerWorkshop, error)
+	GetWorkshop(ctx context.Context, uid string) (PlayerWorkshop, error)
+	CreateWorkshopIfAbsent(ctx context.Context, workshop PlayerWorkshop) (PlayerWorkshop, error)
 	GetFacilities(ctx context.Context, uid string) ([]PlayerFacility, error)
 	GetFacilityInTx(ctx context.Context, tx *gorm.DB, uid string, facilityID string) (PlayerFacility, error)
 	CreateFacilityInTx(ctx context.Context, tx *gorm.DB, facility PlayerFacility) error
 	UpdateFacilityInTx(ctx context.Context, tx *gorm.DB, facility PlayerFacility) error
-	RecordOfflineRewardClaim(ctx context.Context, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error)
-	RecordOfflineRewardClaimInTx(ctx context.Context, tx *gorm.DB, uid string, claim OfflineRewardClaim) (OfflineRewardClaim, error)
+	UpdateLastOfflineRewardAtInTx(ctx context.Context, tx *gorm.DB, uid string, claimedAt int64) error
 }
