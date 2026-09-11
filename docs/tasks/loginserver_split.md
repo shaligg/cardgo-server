@@ -4,7 +4,7 @@
 
 - 状态：`TODO`
 - 类型：后端技术架构任务
-- 优先级：多 GameServer 部署前必须完成
+- 整体优先级：`P0`，多 GameServer 部署前必须完成
 - 实现范围：拆分进程、配置和启动边界，不改玩法逻辑
 - 完成标志：LoginServer 与 GameServer 可独立启动，登录后仍可直连目标 GameServer 完成鉴权
 
@@ -47,6 +47,23 @@
    - `internal/infra/redis/player_owner_store.go`
 
 本任务不要求读取具体玩法策划文档。
+
+## 2.1 执行入口
+
+新会话从第 10 节的 `LS-01` 开始，严格按依赖顺序执行。第 3 至第 9 节用于解释任务边界和目标，不代替执行清单。
+
+优先级口径：
+
+- `P0`：进程拆分主链路，未完成则任务不可用。
+- `P1`：任务收尾，必须完成后才能将整个任务标记为 `DONE`，但不得阻塞前面的代码实现。
+- 本任务没有 `P2` 可选项；非目标统一留到后续独立任务。
+
+状态口径：
+
+- `TODO`：尚未开始。
+- `DOING`：当前正在执行，同一时间只允许一个步骤处于此状态。
+- `DONE`：该步骤的代码、单步检查和交付物全部完成。
+- `BLOCKED`：存在无法在当前任务内解决的外部阻塞，必须记录原因。
 
 ## 3. 任务目标
 
@@ -373,22 +390,217 @@ Redis 中没有健康、非 drain、未满载节点时：
 
 本任务可以保持当前 `loginAPIResponse` 的协议格式，不要求新增完整业务错误码体系。
 
-## 10. 实施步骤
+## 10. 执行任务清单
 
-按以下顺序执行，减少同时改动范围：
+### 10.1 总览
 
-1. 新增 LoginServer 配置结构及配置文件。
-2. 新增 LoginServer `Application`、`Bootstrap`、`Start`、`Stop`。
-3. 新增 `cmd/loginserver/main.go`。
-4. 从 GameServer Bootstrap 删除登录服务构造。
-5. 从 GameServer HTTP mux 删除 `/api/login` 和 `login.Provider` 参数。
-6. 拆分并重命名 GameServer 配置文件，调整默认配置路径。
-7. 更新 smoke/runbook 启动方式和必要的默认地址。
-8. 增加或调整聚焦测试。
-9. 运行完整验收。
-10. 更新本文件状态及相关架构说明。
+| 编号 | 任务 | 优先级 | 依赖 | 状态 |
+|---|---|---|---|---|
+| `LS-01` | 拆分进程配置 | P0 | 无 | TODO |
+| `LS-02` | 实现独立 LoginServer | P0 | LS-01 | TODO |
+| `LS-03` | 移除 GameServer 登录职责 | P0 | LS-02 | TODO |
+| `LS-04` | 完成单节点集成验收 | P0 | LS-03 | TODO |
+| `LS-05` | 完成双节点分配验收 | P0 | LS-04 | TODO |
+| `LS-06` | 同步架构和运维文档 | P1 | LS-05 | TODO |
+| `LS-07` | 完成全量验证与提交 | P1 | LS-06 | TODO |
 
-每一步只迁移现有职责，不重写 allocator、ticket、auth、session 或业务路由。
+执行规则：
+
+1. 开始步骤时，将该步骤状态改为 `DOING`。
+2. 只修改该步骤列出的文件；发现其他问题先记录，不顺手处理。
+3. 单步完成条件满足后改为 `DONE`，再进入下一步。
+4. 聚焦测试可以在对应步骤执行；`go test ./...` 和 `go vet ./...` 只在 `LS-07` 执行。
+5. 每一步只迁移现有职责，不重写 allocator、ticket、auth、session 或业务路由。
+
+### 10.2 LS-01 拆分进程配置
+
+- 优先级：`P0`
+- 依赖：无
+- 状态：`TODO`
+
+执行步骤：
+
+1. 将三个现有 `configs/config.*.yaml` 重命名为 `configs/gameserver.*.yaml`。
+2. 将 GameServer 默认配置路径改为 `configs/gameserver.local.yaml`。
+3. 把 GameServer 的 `api_host/api_port` 配置和 Go 字段改名为 `admin_host/admin_port`。
+4. 保留 GameServer 所需的 WS、MySQL、Redis 节点上报、玩家归属、玩法和管理配置。
+5. 新增 `internal/app/loginserver/config.go`，只声明 HTTP、ticket issuer 和 Redis 读取字段。
+6. 新增 `loginserver.local/staging/prod.yaml`，本地默认监听 `0.0.0.0:8080`。
+7. 两个进程分别使用自己的 `LoadConfigFromEnv`，均允许进程级 `GAME_CONFIG` 覆盖默认路径。
+8. 不增加旧配置路径和旧字段名兼容逻辑。
+9. 为正常加载和关键配置缺失补充聚焦测试。
+
+完成条件：
+
+- [ ] 六份进程配置职责明确。
+- [ ] LoginServer 配置不包含 MySQL、WS、玩法或 GameServer 节点身份。
+- [ ] 旧 `configs/config.*.yaml` 已删除且没有 fallback。
+- [ ] 配置聚焦测试通过。
+
+### 10.3 LS-02 实现独立 LoginServer
+
+- 优先级：`P0`
+- 依赖：`LS-01`
+- 状态：`TODO`
+
+执行步骤：
+
+1. 新增 `loginserver.Application`，只持有配置、HTTP Server 和 Redis 客户端。
+2. 在 `Bootstrap` 中读取配置并校验算法、issuer、ticket TTL 和密钥环境变量。
+3. 创建 Redis Client、`NodeRegistry` 和 `PlayerOwnerStore`。
+4. 使用上述对象组装现有 `RegistryNodeAllocator`、`LocalTicketIssuer` 和 `login.Service`。
+5. 不设置 `login.Service.LastServer` 写入器，玩家权威归属仍由 GameServer 登录成功后认领。
+6. 注册公开的 `POST /api/login` 和基础 `/healthz`。
+7. `Start` 先调用 `net.Listen`，端口绑定失败直接返回错误并释放资源。
+8. `Stop` 先关闭 HTTP Server，再关闭 Redis Client。
+9. 新增 `cmd/loginserver/main.go`，处理 `SIGINT/SIGTERM` 并调用 Bootstrap、Start、Stop。
+10. 为 HTTP 路由、错误配置和端口占用补充聚焦测试。
+
+涉及文件：
+
+```text
+cmd/loginserver/main.go
+internal/app/loginserver/bootstrap.go
+internal/app/loginserver/lifecycle.go
+internal/app/loginserver/config.go
+```
+
+只有 HTTP 路由影响 `bootstrap.go` 可读性时才增加 `internal/app/loginserver/http.go`。
+
+完成条件：
+
+- [ ] `cmd/loginserver` 可以独立编译、启动和停止。
+- [ ] LoginServer 不导入 GameServer、玩法、Repository 或 MySQL 包。
+- [ ] `/api/login` 和 `/healthz` 可访问。
+- [ ] Bootstrap 或监听失败时已创建资源会被释放。
+- [ ] 聚焦测试通过。
+
+### 10.4 LS-03 移除 GameServer 登录职责
+
+- 优先级：`P0`
+- 依赖：`LS-02`
+- 状态：`TODO`
+
+执行步骤：
+
+1. 从 `gameserver.Bootstrap` 删除 `RegistryNodeAllocator`、`LocalTicketIssuer` 和 `login.Service` 的构造。
+2. 删除 `buildAPIMux` 的 `login.Provider` 参数。
+3. 删除 GameServer HTTP mux 中的 `/api/login` 路由。
+4. 保留 `/healthz`、`/metricsz` 和 `/admin/*`。
+5. 使用 `admin_host/admin_port` 构造 GameServer 管理 HTTP 地址。
+6. 保留 `auth.Verifier`、Redis 节点注册、玩家归属、顶号和 WS 逻辑。
+7. 保留 `repo.Migrate(gdb)`，不在本步骤拆迁移命令。
+8. 删除不再使用的 import、字段和参数，不保留兼容空壳。
+9. 调整聚焦测试，确认 GameServer `/api/login` 返回 404。
+
+涉及文件：
+
+```text
+internal/app/gameserver/bootstrap.go
+internal/app/gameserver/admin_http.go
+internal/app/gameserver/config.go
+相关 GameServer 测试
+```
+
+完成条件：
+
+- [ ] GameServer 不再创建 `login.Service` 或 TicketIssuer。
+- [ ] GameServer 管理端口的 `/api/login` 返回 404。
+- [ ] GameServer 仍能注册节点、监听 WS 并验证 LoginServer 签发的 ticket。
+- [ ] 聚焦测试通过。
+
+### 10.5 LS-04 完成单节点集成验收
+
+- 优先级：`P0`
+- 依赖：`LS-03`
+- 状态：`TODO`
+
+执行步骤：
+
+1. 确认本地 MySQL、Redis、`GAME_DB_DSN` 和 `GAME_TICKET_SECRET` 可用。
+2. 使用 `configs/gameserver.local.yaml` 启动 GameServer。
+3. 确认 GameServer 已在 Redis 注册 `node-a`。
+4. 使用 `configs/loginserver.local.yaml` 启动 LoginServer。
+5. 请求 LoginServer `/api/login`，核对 `server_id`、`ws_addr`、`enter_ticket` 和 `expire_at`。
+6. 使用返回地址建立 WebSocket，并用返回 ticket 完成首帧鉴权。
+7. 确认收到 `auth_ack`，再执行现有主链路 smoke。
+8. 检查 GameServer 管理端口的健康、指标和管理路由。
+9. 检查 GameServer 管理端口不再提供 `/api/login`。
+
+完成条件：
+
+- [ ] 第 11.3 节全部验收项通过。
+- [ ] 登录响应和 WS 鉴权协议未改变。
+- [ ] 现有玩法 smoke 通过。
+
+### 10.6 LS-05 完成双节点分配验收
+
+- 优先级：`P0`
+- 依赖：`LS-04`
+- 状态：`TODO`
+
+执行步骤：
+
+1. 创建只用于验收的 `node-b` GameServer 配置。
+2. 为 `node-b` 设置唯一 `node_id`、WS `8091`、管理 HTTP `8092` 和对外 WS 地址。
+3. 同时启动 `node-a`、`node-b` 和一个 LoginServer。
+4. 确认 Redis 节点注册表存在两个有效节点。
+5. 使用多个不同 UID 请求登录，确认分配不会固定集中到单节点。
+6. 让玩家进入某节点后再次登录，确认原节点可用时优先返回原节点。
+7. 将原节点设为 drain 或停止，确认新登录不再分配到该节点。
+8. 对异常退出场景等待节点 TTL，确认过期节点被排除。
+9. 确认 LoginServer 无需重启即可感知节点增减。
+10. 验收后删除不属于正式配置集的临时文件。
+
+完成条件：
+
+- [ ] 第 11.4 和第 11.5 节相关验收项通过。
+- [ ] 新增 GameServer 只需新配置和新进程，不需要修改代码。
+- [ ] 单节点 2000 连接硬上限仍由各 GameServer 独立执行。
+
+### 10.7 LS-06 同步架构和运维文档
+
+- 优先级：`P1`
+- 依赖：`LS-05`
+- 状态：`TODO`
+
+执行步骤：
+
+1. 更新根目录 `README.md` 的双进程启动顺序和命令。
+2. 更新 `architecture_v2.md`，将登录模块改为独立进程现状。
+3. 更新 `backend_technical_architecture.md` 的进程图、目录、配置、登录时序和职责描述。
+4. 更新 `docs/ops/runbook.md` 的端口、环境变量、启动、停止和 smoke 操作。
+5. 删除失效的单进程描述，不保留两套冲突口径。
+6. 在本文件记录实际验证结果并更新任务状态。
+
+完成条件：
+
+- [ ] 权威文档不再描述 LoginServer 与 GameServer 同进程。
+- [ ] 新会话可以仅按 README 和 runbook 启动完整服务。
+- [ ] 产品总设计和玩法文档没有被加入技术实现细节。
+
+### 10.8 LS-07 完成全量验证与提交
+
+- 优先级：`P1`
+- 依赖：`LS-06`
+- 状态：`TODO`
+
+执行步骤：
+
+1. 对所有修改过的 Go 文件运行 `gofmt`。
+2. 运行 `go test ./...`。
+3. 运行 `go vet ./...`。
+4. 运行 `git diff --check`。
+5. 检查最终差异，确认没有玩法改动、兼容分支和无关重构。
+6. 确认第 12 节完成清单全部满足。
+7. 将本文件整体状态和步骤状态更新为 `DONE`，记录验证结果。
+8. 创建一次本地提交，不执行 push。
+
+完成条件：
+
+- [ ] 全量测试、vet 和 diff 检查通过。
+- [ ] 本任务只有一套最终实现口径。
+- [ ] 已本地提交且未 push。
 
 ## 11. 测试要求
 
