@@ -1,23 +1,65 @@
 # Runbook
 
-## 1. Start Service
-- 先确认 MySQL 数据库已创建，并设置 `GAME_DB_DSN`。应用启动时执行当前 MVP 表的 `AutoMigrate`，不会创建数据库本身。
-- 先确认共享 Redis 可用：`redis-cli -h 127.0.0.1 -p 6379 ping`
-- `GAME_CONFIG=configs/config.local.yaml GAME_DB_DSN='game:password@tcp(127.0.0.1:3306)/game_demo?charset=utf8mb4&parseTime=True&loc=Local' GAME_TICKET_SECRET=local-dev-ticket-secret go run ./cmd/gameserver`
-- 本地配置只启动 `node-a`，但运行时仍会注册到 Redis，LoginService 不使用静态单节点列表。
-- 本地配置允许不校验管理 Token；staging/prod 启动前必须设置 `GAME_ADMIN_TOKEN`，否则服务拒绝启动。
-- 本地 `ws.allowed_origins: ["*"]` 只用于开发；staging/prod 接入 Web 客户端前必须配置准确的 `https://域名`，原生客户端无 `Origin` 不受此项影响。
-- 该启动方式只用于单节点 Demo。增加第二个 GameServer 前先拆出独立单实例 LoginServer；之后每个纯 GameServer 使用唯一的 `server.node_id` 和客户端可访问的 `server.advertised_ws_addr`，并连接同一个 Redis。
-- 正式环境中的 Redis 地址和 `advertised_ws_addr` 必须由部署配置覆盖，不能沿用仓库内的本地地址。
-- `GAME_DB_DSN` 必须包含 `charset=utf8mb4&parseTime=True&loc=Local`；账号密码只放部署环境变量或密钥系统，不写入仓库配置。
+## 1. Start Services
+
+先确认 MySQL 开发库已创建、Redis 可用。GameServer 保留 AutoMigrate，只创建或调整表，不创建数据库。两个进程从仓库根目录启动：
+
+终端 1：启动 GameServer，注册 node-a。
+
+```bash
+redis-cli -h 127.0.0.1 -p 6379 ping
+export GAME_DB_DSN='game:password@tcp(127.0.0.1:3306)/game_demo?charset=utf8mb4&parseTime=True&loc=Local'
+export GAME_TICKET_SECRET='local-dev-ticket-secret'
+GAME_CONFIG=configs/gameserver.local.yaml go run ./cmd/gameserver
+```
+
+终端 2：用同一密钥启动 LoginServer，无需 GAME_DB_DSN。
+
+```bash
+export GAME_TICKET_SECRET='local-dev-ticket-secret'
+GAME_CONFIG=configs/loginserver.local.yaml go run ./cmd/loginserver
+```
+
+| 进程 | 端口与路由 |
+|---|---|
+| LoginServer | 8080：POST /api/login、GET /healthz |
+| GameServer A | 8081：/ws；8082：/healthz、/metricsz、/admin/* |
+| GameServer B（扩容/验收） | 8091：/ws；8092：管理 HTTP |
+
+- 六份正式配置为 gameserver.local/staging/prod.yaml 和 loginserver.local/staging/prod.yaml；省略 GAME_CONFIG 时读取对应 local 文件，无旧文件名 fallback。
+- 两个进程必须共享 ticket issuer、算法、密钥，以及同一 Redis 实例、DB、节点和玩家归属 key 前缀。
+- staging/prod 必须设置 GAME_ADMIN_TOKEN，管理路由和指标需要 Bearer Token；LoginServer 不读取管理 Token。
+- 本地 ws.allowed_origins: ["*"] 只用于开发；staging/prod Web 客户端应配置准确 Origin。
+- 正式环境须覆盖 Redis 地址和 advertised_ws_addr。新增 GameServer 使用独立配置、唯一 node_id、WS/Admin 端口和 advertised_ws_addr，共享业务数据库与 Redis。LoginServer 自动感知节点，无需重启。
+- Ctrl-C 或 SIGTERM 分别停止对应进程。LoginServer 先停 HTTP，再关闭 Redis；已进入 GameServer 的玩家仍可请求。GameServer 停止时注销节点并关闭 WS，维护时先执行第 6 节 drain。
+- LoginServer /healthz 只表示 HTTP 进程存活；无可用节点或 Redis 故障时登录返回 HTTP 500、code=1，不签发票据。
 
 ## 2. Baseline Smoke
+
 - `curl http://127.0.0.1:8080/healthz`
-- `curl http://127.0.0.1:8080/metricsz -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}"`
+- `curl http://127.0.0.1:8082/healthz`
+- `curl http://127.0.0.1:8082/metricsz -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}"`
 - `curl -X POST http://127.0.0.1:8080/api/login -H 'Content-Type: application/json' -d '{"account":"u1001","password":"x","client_ip":"127.0.0.1","client_ver":"1.0.0"}'`
 - `go run ./scripts/loadtest/ws_auth_smoke.go`
 - `go run ./scripts/loadtest/ws_biz_smoke`
 - `go run ./scripts/loadtest/ws_reconnect_smoke`
+- `go run ./scripts/loadtest/ws_prototype_smoke`
+- `curl -X POST http://127.0.0.1:8082/api/login` 应返回 404。
+
+### 2.1 Split-process Acceptance
+
+创建独立测试数据库，安装 redis-server，确保 8080/8081/8082/8091/8092 空闲：
+
+```bash
+LOGIN_SPLIT_TEST_DB_DSN='game_test:password@tcp(127.0.0.1:3306)/game_test?charset=utf8mb4&parseTime=True&loc=Local' \
+  go test ./scripts/loadtest/loginserver_split -v -count=1
+```
+
+单节点使用 `-run '^TestSingleNode$'`，双节点使用 `-run '^TestMultiNode$'`。未设置 LOGIN_SPLIT_TEST_DB_DSN 时默认跳过。测试会写所选数据库，自动创建和清理临时 Redis、服务进程及配置，不停止已有开发 Redis 或服务；测试库中的玩家数据保留。
+
+覆盖登录到 auth_ack、主链路 smoke、管理路由、默认监控、错误密钥、五个 claims 字段篡改、重放、错服票据、双节点分配和原服优先、drain/满载避让、正常注销、异常退出 TTL、Redis 故障以及停 LoginServer 后在线 WS 可用。双节点测试用 1 秒心跳、3 秒 TTL 加速验收，本地正式示例仍为 5/15 秒；drain 和连接数断言等待 Redis 心跳更新。
+
+容量验收分别占用每节点 2000 个真实 WS 连接槽，确认第 2001 个连接返回 SERVER_FULL。这是短时准入测试，不替代下文正式时长的 2000 在线性能压测。
 
 ## 3. P5 Load Test (k6)
 
@@ -84,7 +126,7 @@ staging/prod 使用管理 Token：
 
 ```bash
 go run ./scripts/monitoring/metrics_dashboard \
-  -url http://127.0.0.1:8080/metricsz \
+  -url http://127.0.0.1:8082/metricsz \
   -token "${GAME_ADMIN_TOKEN}"
 ```
 
@@ -124,11 +166,11 @@ go run ./scripts/monitoring/metrics_dashboard \
 ## 6. Drain
 - staging/prod 的 `/admin/*` 和 `/metricsz` 请求都必须携带 `Authorization: Bearer ${GAME_ADMIN_TOKEN}`；本地配置关闭校验时该请求头可省略。
 - Enable drain mode at runtime:
-- `curl -X POST http://127.0.0.1:8080/admin/drain -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}" -H 'Content-Type: application/json' -d '{"enabled":true}'`
+- `curl -X POST http://127.0.0.1:8082/admin/drain -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}" -H 'Content-Type: application/json' -d '{"enabled":true}'`
 - Check drain state:
-- `curl http://127.0.0.1:8080/admin/drain -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}"`
+- `curl http://127.0.0.1:8082/admin/drain -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}"`
 - Check active sessions:
-- `curl http://127.0.0.1:8080/admin/sessions -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}"`
+- `curl http://127.0.0.1:8082/admin/sessions -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}"`
 - During drain:
 - new WS connections/auth should receive `SERVER_FULL`
 - existing sessions continue until client disconnect or server stop
@@ -136,8 +178,8 @@ go run ./scripts/monitoring/metrics_dashboard \
 - Stop process; authoritative player data has already been committed by business transactions
 
 ## 7. Rollback
-- Restore previous binary
-- Restore previous config
+- Restore the binary and matching process config for the affected LoginServer or GameServer
+- Keep ticket and Redis shared settings consistent across both processes
 - Restart and verify:
-- `curl http://127.0.0.1:8080/healthz`
-- `curl http://127.0.0.1:8080/metricsz -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}"`
+- `curl http://127.0.0.1:8082/healthz`
+- `curl http://127.0.0.1:8082/metricsz -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}"`

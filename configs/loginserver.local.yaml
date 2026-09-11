@@ -1,0 +1,16 @@
+http:
+  host: "0.0.0.0"
+  port: 8080
+
+auth:
+  issuer: "login-module"
+  algorithm: "hmac-sha256"
+  ticket_ttl_sec: 60
+  secret_env_key: "GAME_TICKET_SECRET"
+
+redis:
+  addr: "127.0.0.1:6379"
+  password_env_key: "GAME_REDIS_PASSWORD"
+  db: 0
+  node_key_prefix: "game:gameserver"
+  player_owner_key_prefix: "game:player_owner"

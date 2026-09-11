@@ -1,7 +1,6 @@
 package gameserver
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,15 +8,8 @@ import (
 
 	"github.com/bigfish/go_orm_1/internal/framework/gateway/ws"
 	"github.com/bigfish/go_orm_1/internal/infra/metrics"
-	"github.com/bigfish/go_orm_1/internal/platform/login"
 	"github.com/bigfish/go_orm_1/internal/platform/session"
 )
-
-type stubLoginProvider struct{}
-
-func (stubLoginProvider) LoginAndIssueTicket(context.Context, login.LoginRequest) (login.LoginResult, error) {
-	return login.LoginResult{UID: "u1"}, nil
-}
 
 func TestBuildAPIMuxProtectsManagementRoutes(t *testing.T) {
 	cfg := defaultConfig()
@@ -28,7 +20,6 @@ func TestBuildAPIMuxProtectsManagementRoutes(t *testing.T) {
 		ws.NewServer(ws.Options{}),
 		metrics.NewRegistry(),
 		session.NewMemoryManager(),
-		stubLoginProvider{},
 	)
 
 	for _, path := range []string{"/metricsz", "/admin/drain", "/admin/sessions"} {
@@ -53,7 +44,7 @@ func TestBuildAPIMuxProtectsManagementRoutes(t *testing.T) {
 	}
 }
 
-func TestBuildAPIMuxKeepsPublicRoutesOpen(t *testing.T) {
+func TestBuildAPIMuxExposesHealthWithoutLogin(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Admin.RequireAuth = true
 	handler := buildAPIMux(
@@ -62,23 +53,23 @@ func TestBuildAPIMuxKeepsPublicRoutesOpen(t *testing.T) {
 		ws.NewServer(ws.Options{}),
 		metrics.NewRegistry(),
 		session.NewMemoryManager(),
-		stubLoginProvider{},
 	)
 
 	tests := []struct {
 		method string
 		path   string
 		body   string
+		status int
 	}{
-		{method: http.MethodGet, path: "/healthz"},
-		{method: http.MethodPost, path: "/api/login", body: `{"account":"u1"}`},
+		{method: http.MethodGet, path: "/healthz", status: http.StatusOK},
+		{method: http.MethodPost, path: "/api/login", body: `{"account":"u1"}`, status: http.StatusNotFound},
 	}
 	for _, tt := range tests {
 		req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, req)
-		if resp.Code != http.StatusOK {
-			t.Fatalf("%s %s status = %d, want %d; body=%s", tt.method, tt.path, resp.Code, http.StatusOK, resp.Body.String())
+		if resp.Code != tt.status {
+			t.Fatalf("%s %s status = %d, want %d; body=%s", tt.method, tt.path, resp.Code, tt.status, resp.Body.String())
 		}
 	}
 }

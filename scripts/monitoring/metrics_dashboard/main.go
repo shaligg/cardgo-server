@@ -28,7 +28,7 @@ type alert struct {
 func main() {
 	limits := defaultThresholds()
 	var (
-		metricsURL = flag.String("url", "http://127.0.0.1:8080/metricsz", "metrics endpoint")
+		metricsURL = flag.String("url", "http://127.0.0.1:8082/metricsz", "metrics endpoint")
 		token      = flag.String("token", os.Getenv("GAME_ADMIN_TOKEN"), "admin bearer token")
 		interval   = flag.Duration("interval", 5*time.Second, "refresh interval")
 		once       = flag.Bool("once", false, "fetch once and exit")

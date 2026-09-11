@@ -8,6 +8,7 @@ Cardgo Server is a game server demo that implements a complete client-to-databas
 
 ### Core Features
 
+- **Independent LoginServer** — HTTP login, Redis node allocation and signed entry tickets; clients connect directly to the assigned GameServer
 - **WebSocket Gateway** — connection upgrade, HMAC ticket authentication, nonce-based replay protection, heartbeat, rate limiting, graceful shutdown
 - **Shard Dispatcher** — per-player serial execution via 64-way sharded locks; ensures data consistency without blocking different players
 - **6 Business Modules** — Player, Asset, Inventory under `domain`; Card, Battle, Workshop under `gameplay`
@@ -19,8 +20,10 @@ Cardgo Server is a game server demo that implements a complete client-to-databas
 ## Project Structure
 
 ```
-cmd/gameserver/          # Entry point
+cmd/loginserver/         # Login HTTP entry point
+cmd/gameserver/          # GameServer entry point
 internal/
+  app/loginserver/       # Login config, Redis wiring and HTTP lifecycle
   app/gameserver/        # Bootstrap, lifecycle, config
   framework/
     gateway/ws/          # WebSocket server, client, codec, limiter
@@ -51,7 +54,7 @@ configs/                 # Runtime configuration by environment
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.24.2+
 - MySQL 8.0+
 - Redis 6.0+
 
@@ -59,21 +62,31 @@ configs/                 # Runtime configuration by environment
 
 ```bash
 # Install dependencies
-go mod tidy
+go mod download
 
 # Build
 go build -o bin/gameserver ./cmd/gameserver
-
-# Run (requires MySQL and Redis)
-export GAME_DB_DSN='game:password@tcp(127.0.0.1:3306)/game_demo?charset=utf8mb4&parseTime=True&loc=Local'
-export GAME_TICKET_SECRET='local-dev-ticket-secret'
-./bin/gameserver
-
-# Or run directly
-GAME_DB_DSN="$GAME_DB_DSN" GAME_TICKET_SECRET="$GAME_TICKET_SECRET" go run ./cmd/gameserver
+go build -o bin/loginserver ./cmd/loginserver
 ```
 
-The API server listens on `:8080`; the WebSocket server listens on `:8081/ws`.
+Start GameServer in terminal 1 (create the MySQL database first and start Redis):
+
+```bash
+export GAME_DB_DSN='game:password@tcp(127.0.0.1:3306)/game_demo?charset=utf8mb4&parseTime=True&loc=Local'
+export GAME_TICKET_SECRET='local-dev-ticket-secret'
+GAME_CONFIG=configs/gameserver.local.yaml ./bin/gameserver
+```
+
+Start LoginServer in terminal 2 with the same ticket secret:
+
+```bash
+export GAME_TICKET_SECRET='local-dev-ticket-secret'
+GAME_CONFIG=configs/loginserver.local.yaml ./bin/loginserver
+```
+
+Alternatively, replace the binary commands with `go run ./cmd/gameserver` and `go run ./cmd/loginserver` in their respective terminals.
+
+LoginServer listens on `:8080` (`POST /api/login`, `/healthz`). GameServer listens on `:8081/ws` and exposes management, health and metrics on `:8082`. GameServer does not expose `/api/login`. LoginServer needs Redis and the ticket secret, but no MySQL connection. Stop either process with Ctrl-C; stopping LoginServer leaves existing GameServer connections alive.
 
 ### Run Tests
 
@@ -82,11 +95,16 @@ go test ./...
 
 # Run MySQL integration tests as well.
 GAME_TEST_DB_DSN='game_test:password@tcp(127.0.0.1:3306)/game_test?charset=utf8mb4&parseTime=True&loc=Local' go test ./...
+
+# Explicit process acceptance: use a separate test database and free local ports.
+LOGIN_SPLIT_TEST_DB_DSN='game_test:password@tcp(127.0.0.1:3306)/game_test?charset=utf8mb4&parseTime=True&loc=Local' go test ./scripts/loadtest/loginserver_split -v -count=1
 ```
 
 ## Configuration
 
-Edit the environment file under `configs/`. Database credentials are not written to YAML; the DSN is read from the environment variable named by `db.dsn_env_key`.
+Edit `configs/gameserver.{local,staging,prod}.yaml` and `configs/loginserver.{local,staging,prod}.yaml`. Each process accepts `GAME_CONFIG`, defaulting to its own local file. Both must use the same ticket issuer, algorithm, secret and Redis instance/DB/key prefixes. Database credentials are read only by GameServer from the environment variable named by `db.dsn_env_key`.
+
+For another GameServer, use a unique `server.node_id`, WS/Admin ports and `server.advertised_ws_addr`. LoginServer discovers it through Redis without restarting. See [the runbook](docs/ops/runbook.md) for startup, drain, monitoring and acceptance commands. The demo still treats `account` as UID; formal account authentication is not implemented.
 
 ## Architecture
 
@@ -111,7 +129,7 @@ Client ──WS──▶ Gateway ──▶ Auth ──▶ Dispatcher (shard) ─
 
 | Component | Technology |
 |-----------|-----------|
-| Language | Go 1.21+ |
+| Language | Go 1.24.2+ |
 | WebSocket | gorilla/websocket |
 | ORM | GORM + MySQL |
 | Shared State | Redis (go-redis/v9) |

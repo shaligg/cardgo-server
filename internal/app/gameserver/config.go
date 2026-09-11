@@ -7,13 +7,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const defaultConfigPath = "configs/config.local.yaml"
+const defaultConfigPath = "configs/gameserver.local.yaml"
 
 type Config struct {
 	Server struct {
 		NodeID           string `yaml:"node_id"`
-		APIHost          string `yaml:"api_host"`
-		APIPort          int    `yaml:"api_port"`
+		AdminHost        string `yaml:"admin_host"`
+		AdminPort        int    `yaml:"admin_port"`
 		WSHost           string `yaml:"ws_host"`
 		WSPort           int    `yaml:"ws_port"`
 		AdvertisedWSAddr string `yaml:"advertised_ws_addr"`
@@ -24,7 +24,6 @@ type Config struct {
 	Auth struct {
 		Issuer       string `yaml:"issuer"`
 		Algorithm    string `yaml:"algorithm"`
-		TicketTTLSec int    `yaml:"ticket_ttl_sec"`
 		NonceTTLSec  int    `yaml:"nonce_ttl_sec"`
 		SecretEnvKey string `yaml:"secret_env_key"`
 	} `yaml:"auth"`
@@ -102,8 +101,8 @@ func LoadConfigFromEnv() (Config, error) {
 func defaultConfig() Config {
 	var cfg Config
 	cfg.Server.NodeID = "node-a"
-	cfg.Server.APIHost = "0.0.0.0"
-	cfg.Server.APIPort = 8080
+	cfg.Server.AdminHost = "0.0.0.0"
+	cfg.Server.AdminPort = 8082
 	cfg.Server.WSHost = "0.0.0.0"
 	cfg.Server.WSPort = 8081
 	cfg.Server.AdvertisedWSAddr = "ws://127.0.0.1:8081/ws"
@@ -112,7 +111,6 @@ func defaultConfig() Config {
 
 	cfg.Auth.Issuer = "login-module"
 	cfg.Auth.Algorithm = "hmac-sha256"
-	cfg.Auth.TicketTTLSec = 60
 	cfg.Auth.NonceTTLSec = 120
 	cfg.Auth.SecretEnvKey = "GAME_TICKET_SECRET"
 	cfg.Admin.TokenEnvKey = "GAME_ADMIN_TOKEN"
@@ -152,11 +150,11 @@ func applyDefaults(cfg *Config) {
 	if cfg.Server.NodeID == "" {
 		cfg.Server.NodeID = "node-a"
 	}
-	if cfg.Server.APIHost == "" {
-		cfg.Server.APIHost = "0.0.0.0"
+	if cfg.Server.AdminHost == "" {
+		cfg.Server.AdminHost = "0.0.0.0"
 	}
-	if cfg.Server.APIPort == 0 {
-		cfg.Server.APIPort = 8080
+	if cfg.Server.AdminPort == 0 {
+		cfg.Server.AdminPort = 8082
 	}
 	if cfg.Server.WSHost == "" {
 		cfg.Server.WSHost = "0.0.0.0"
@@ -176,9 +174,6 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Server.DispatcherShards <= 0 {
 		cfg.Server.DispatcherShards = 64
-	}
-	if cfg.Auth.TicketTTLSec <= 0 {
-		cfg.Auth.TicketTTLSec = 60
 	}
 	if cfg.Auth.NonceTTLSec <= 0 {
 		cfg.Auth.NonceTTLSec = 120

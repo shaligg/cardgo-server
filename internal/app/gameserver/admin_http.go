@@ -8,14 +8,13 @@ import (
 
 	"github.com/bigfish/go_orm_1/internal/framework/gateway/ws"
 	"github.com/bigfish/go_orm_1/internal/infra/metrics"
-	"github.com/bigfish/go_orm_1/internal/platform/login"
 	"github.com/bigfish/go_orm_1/internal/platform/session"
 )
 
-// buildAPIMux 组装 gameserver 同进程 HTTP 入口。
+// buildAPIMux 组装 GameServer 管理 HTTP 入口。
 //
-// 玩家实时玩法不走这里；这里仅承载登录发票、健康检查、指标和受控管理接口。
-func buildAPIMux(cfg Config, adminToken string, wsServer *ws.Server, metricsReg *metrics.Registry, sessionManager session.Manager, loginService login.Provider) http.Handler {
+// 这里仅承载健康检查、指标和受控管理接口；登录入口由 LoginServer 提供。
+func buildAPIMux(cfg Config, adminToken string, wsServer *ws.Server, metricsReg *metrics.Registry, sessionManager session.Manager) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -91,7 +90,6 @@ func buildAPIMux(cfg Config, adminToken string, wsServer *ws.Server, metricsReg 
 			},
 		})
 	})))
-	mux.Handle("/api/login", login.NewHTTPHandler(loginService))
 	return mux
 }
 

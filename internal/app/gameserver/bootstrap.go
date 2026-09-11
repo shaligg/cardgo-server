@@ -35,7 +35,7 @@ import (
 // Application 持有 GameServer 的运行组件和基础设施资源，并统一管理其生命周期。
 type Application struct {
 	cfg                   Config
-	apiServer             *http.Server
+	adminServer           *http.Server
 	wsServer              *ws.Server
 	stateMaintainer       *state.Maintainer
 	dbPool                io.Closer
@@ -238,27 +238,15 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		OwnerReconciler:    ownerReconciler,
 	})
 
-	loginService := login.Service{
-		Allocator: login.RegistryNodeAllocator{
-			Registry:   nodeRegistry,
-			LastServer: playerOwnerStore,
-		},
-		Issuer: login.LocalTicketIssuer{
-			TTL:    time.Duration(cfg.Auth.TicketTTLSec) * time.Second,
-			Secret: []byte(ticketSecret),
-			Issuer: cfg.Auth.Issuer,
-		},
-	}
-
-	apiAddr := fmt.Sprintf("%s:%d", cfg.Server.APIHost, cfg.Server.APIPort)
-	apiServer := &http.Server{
-		Addr:    apiAddr,
-		Handler: buildAPIMux(cfg, adminToken, wsServer, metricsReg, sessionManager, loginService),
+	adminAddr := fmt.Sprintf("%s:%d", cfg.Server.AdminHost, cfg.Server.AdminPort)
+	adminServer := &http.Server{
+		Addr:    adminAddr,
+		Handler: buildAPIMux(cfg, adminToken, wsServer, metricsReg, sessionManager),
 	}
 
 	app := &Application{
 		cfg:             cfg,
-		apiServer:       apiServer,
+		adminServer:     adminServer,
 		wsServer:        wsServer,
 		stateMaintainer: stateMaintainer,
 		dbPool:          dbPool,
@@ -276,6 +264,6 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 		nodeTTL:               time.Duration(cfg.Redis.NodeTTLSec) * time.Second,
 	}
 	bootstrapComplete = true
-	ilog.Infof("bootstrap done node=%s api=%s ws=%s", cfg.Server.NodeID, apiAddr, wsServer.Addr)
+	ilog.Infof("bootstrap done node=%s admin=%s ws=%s", cfg.Server.NodeID, adminAddr, wsServer.Addr)
 	return app, nil
 }

@@ -1,7 +1,7 @@
 server:
   node_id: "node-prod"
-  api_host: "0.0.0.0"
-  api_port: 8080
+  admin_host: "0.0.0.0"
+  admin_port: 8082
   ws_host: "0.0.0.0"
   ws_port: 8081
   advertised_ws_addr: "ws://127.0.0.1:8081/ws"

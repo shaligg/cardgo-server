@@ -69,16 +69,16 @@ func (r *recordingNodeRegistrar) RemoveNode(ctx context.Context, serverID string
 	return nil
 }
 
-func TestApplicationStartReturnsAPIListenError(t *testing.T) {
+func TestApplicationStartReturnsAdminListenError(t *testing.T) {
 	dbPool := &recordingCloser{}
 	redisClient := &recordingCloser{}
 	app := &Application{
-		apiServer:   &http.Server{Addr: "127.0.0.1:not-a-port"},
+		adminServer: &http.Server{Addr: "127.0.0.1:not-a-port"},
 		dbPool:      dbPool,
 		redisClient: redisClient,
 	}
 	if err := app.Start(context.Background()); err == nil {
-		t.Fatal("Start should return API listener error")
+		t.Fatal("Start should return admin listener error")
 	}
 	if dbPool.calls != 1 || redisClient.calls != 1 {
 		t.Fatalf("close calls db=%d redis=%d, want 1 each", dbPool.calls, redisClient.calls)

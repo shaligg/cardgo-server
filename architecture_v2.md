@@ -10,7 +10,7 @@
 - MVP 要实现哪些后端模块。
 - 哪些完整业务后置，哪些代码边界从 MVP 起建立。
 - 模块之间的边界如何划分。
-- 当前单进程架构未来如何演进到多进程或服务拆分。
+- 当前 LoginServer/GameServer 独立进程如何扩展节点或继续拆分公共模块。
 
 更细的技术实现放在：
 
@@ -42,19 +42,20 @@
 当前 MVP 采用：
 
 ```text
-单 GameServer 进程
+独立 LoginServer 进程
+  + 一个或多个 GameServer 进程
   + 多 goroutine
   + 模块化单体
   + 按未来多进程/服务拆分边界编码
 ```
 
-当前不是微服务，也不是多进程集群优先。
+GameServer 业务仍采用模块化单体，登录入口已独立部署。
 
 目标是：
 
 - 先用 1 个游戏服进程承载单服 2000 在线。
-- 登录模块当前同进程实现，但接口按独立登录服务设计。
-- 一旦扩展为多个 GameServer，先把 Login 拆成单独进程；不采用“每个 GameServer 都内置一个 Login”的部署方式。
+- LoginServer 独立提供登录、Redis 节点分配和 ticket 签发。
+- 新增 GameServer 只需唯一节点配置和新进程，多个 GameServer 共享一个 LoginServer。
 - 业务模块按服务边界写，后续可平滑拆分。
 - 战斗、房间等高频局内状态可以保存在本机内存。
 - 玩家权威数据必须在 DB。
@@ -65,8 +66,13 @@
 MVP 运行形态：
 
 ```text
-GameServer 进程
+LoginServer 进程
   - HTTP Login API
+  - Redis 节点表与最近归属读取
+  - NodeAllocator / TicketIssuer
+  - 基础 health
+
+GameServer 进程
   - WebSocket Gateway
   - Auth / Session
   - Dispatcher
@@ -84,8 +90,12 @@ DB
 Go 运行模型：
 
 ```text
-1 个进程
-  - HTTP goroutine
+LoginServer 进程
+  - 登录 HTTP goroutine
+  - Redis 客户端
+
+每个 GameServer 进程
+  - 管理 HTTP goroutine
   - WebSocket accept goroutine
   - 每连接读 goroutine
   - 每连接写 goroutine
@@ -346,7 +356,8 @@ MVP 第一条主链路：
 阶段 1：MVP
 
 ```text
-单进程 + 多 goroutine + 模块化单体
+独立 LoginServer + 单 GameServer
+GameServer 内多 goroutine + 模块化单体
 ```
 
 阶段 2：多 GameServer

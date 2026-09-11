@@ -14,9 +14,9 @@ import (
 
 // Start 按 API 占位、顶号订阅、WS 监听、节点注册的顺序启动应用，避免注册尚未就绪的节点。
 func (a *Application) Start(ctx context.Context) error {
-	apiListener, err := net.Listen("tcp", a.apiServer.Addr)
+	adminListener, err := net.Listen("tcp", a.adminServer.Addr)
 	if err != nil {
-		return errors.Join(fmt.Errorf("listen api %s: %w", a.apiServer.Addr, err), a.closeInfrastructure())
+		return errors.Join(fmt.Errorf("listen admin http %s: %w", a.adminServer.Addr, err), a.closeInfrastructure())
 	}
 	if a.playerKickBus != nil {
 		if err := a.playerKickBus.Start(ctx, a.nodeInfo.ServerID, func(notice iredis.PlayerKickNotice) {
@@ -29,20 +29,20 @@ func (a *Application) Start(ctx context.Context) error {
 				a.wsServer.KickAll(notice.Reason)
 			}
 		}); err != nil {
-			_ = apiListener.Close()
+			_ = adminListener.Close()
 			return errors.Join(err, a.closeInfrastructure())
 		}
 	}
 
 	if err := a.wsServer.Start(ctx); err != nil {
-		_ = apiListener.Close()
+		_ = adminListener.Close()
 		if a.playerKickBus != nil {
 			_ = a.playerKickBus.Stop()
 		}
 		return errors.Join(err, a.closeInfrastructure())
 	}
 	if err := a.reportNode(ctx); err != nil {
-		_ = apiListener.Close()
+		_ = adminListener.Close()
 		_ = a.wsServer.Stop(context.Background())
 		if a.playerKickBus != nil {
 			_ = a.playerKickBus.Stop()
@@ -55,9 +55,9 @@ func (a *Application) Start(ctx context.Context) error {
 	}
 
 	go func() {
-		ilog.Infof("api server listening on %s", a.apiServer.Addr)
-		if err := a.apiServer.Serve(apiListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			ilog.Errorf("api server stopped with error: %v", err)
+		ilog.Infof("admin http server listening on %s", a.adminServer.Addr)
+		if err := a.adminServer.Serve(adminListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			ilog.Errorf("admin http server stopped with error: %v", err)
 		}
 	}()
 	return nil
@@ -93,7 +93,7 @@ func (a *Application) Stop(ctx context.Context) error {
 			firstErr = err
 		}
 	}
-	if err := a.apiServer.Shutdown(shutdownCtx); err != nil && firstErr == nil {
+	if err := a.adminServer.Shutdown(shutdownCtx); err != nil && firstErr == nil {
 		firstErr = err
 	}
 	if err := a.closeInfrastructure(); err != nil && firstErr == nil {

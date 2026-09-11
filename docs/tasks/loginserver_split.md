@@ -2,7 +2,7 @@
 
 ## 1. 任务状态
 
-- 状态：`TODO`
+- 状态：`DONE`
 - 类型：后端技术架构任务
 - 整体优先级：`P0`，多 GameServer 部署前必须完成
 - 实现范围：拆分进程、配置和启动边界，不改玩法逻辑
@@ -211,6 +211,9 @@ internal/app/loginserver/http.go
 internal/app/gameserver/bootstrap.go
 internal/app/gameserver/admin_http.go
 internal/app/gameserver/config.go
+internal/app/gameserver/lifecycle.go
+scripts/monitoring/metrics_dashboard/main.go
+scripts/loadtest/loginserver_split/main_test.go
 configs/
 README.md
 architecture_v2.md
@@ -290,10 +293,12 @@ LoginServer 不应包含：
 | LoginServer | Login HTTP | 8080 |
 | GameServer A | WebSocket | 8081 |
 | GameServer A | Admin/health/metrics HTTP | 8082 |
-| GameServer B（验收时可选） | WebSocket | 8091 |
-| GameServer B（验收时可选） | Admin/health/metrics HTTP | 8092 |
+| GameServer B（双节点验收必需） | WebSocket | 8091 |
+| GameServer B（双节点验收必需） | Admin/health/metrics HTTP | 8092 |
 
 保留 LoginServer `8080` 和首个 GameServer WS `8081`，使现有 smoke 脚本尽量无需修改。
+
+监控脚本 `scripts/monitoring/metrics_dashboard` 的默认指标地址同步改为 `http://127.0.0.1:8082/metricsz`。登录地址与管理地址分别维护，不把所有 `8080` 引用统一替换。两个进程必须使用相同的 ticket issuer、算法和密钥，以及同一 Redis 实例、DB 和节点/玩家归属 key 前缀。
 
 ## 8. 组件装配
 
@@ -396,18 +401,18 @@ Redis 中没有健康、非 drain、未满载节点时：
 
 | 编号 | 任务 | 优先级 | 依赖 | 状态 |
 |---|---|---|---|---|
-| `LS-01` | 拆分进程配置 | P0 | 无 | TODO |
-| `LS-02` | 实现独立 LoginServer | P0 | LS-01 | TODO |
-| `LS-03` | 移除 GameServer 登录职责 | P0 | LS-02 | TODO |
-| `LS-04` | 完成单节点集成验收 | P0 | LS-03 | TODO |
-| `LS-05` | 完成双节点分配验收 | P0 | LS-04 | TODO |
-| `LS-06` | 同步架构和运维文档 | P1 | LS-05 | TODO |
-| `LS-07` | 完成全量验证与提交 | P1 | LS-06 | TODO |
+| `LS-01` | 拆分进程配置 | P0 | 无 | DONE |
+| `LS-02` | 实现独立 LoginServer | P0 | LS-01 | DONE |
+| `LS-03` | 移除 GameServer 登录职责 | P0 | LS-02 | DONE |
+| `LS-04` | 完成单节点集成验收 | P0 | LS-03 | DONE |
+| `LS-05` | 完成双节点分配验收 | P0 | LS-04 | DONE |
+| `LS-06` | 同步架构和运维文档 | P1 | LS-05 | DONE |
+| `LS-07` | 完成全量验证与提交 | P1 | LS-06 | DONE |
 
 执行规则：
 
 1. 开始步骤时，将该步骤状态改为 `DOING`。
-2. 只修改该步骤列出的文件；发现其他问题先记录，不顺手处理。
+2. 只修改该步骤列出的文件及其相关测试；任务状态统一更新到本文件。发现其他问题先记录，不顺手处理。
 3. 单步完成条件满足后改为 `DONE`，再进入下一步。
 4. 聚焦测试可以在对应步骤执行；`go test ./...` 和 `go vet ./...` 只在 `LS-07` 执行。
 5. 每一步只迁移现有职责，不重写 allocator、ticket、auth、session 或业务路由。
@@ -416,13 +421,13 @@ Redis 中没有健康、非 drain、未满载节点时：
 
 - 优先级：`P0`
 - 依赖：无
-- 状态：`TODO`
+- 状态：`DONE`
 
 执行步骤：
 
 1. 将三个现有 `configs/config.*.yaml` 重命名为 `configs/gameserver.*.yaml`。
 2. 将 GameServer 默认配置路径改为 `configs/gameserver.local.yaml`。
-3. 把 GameServer 的 `api_host/api_port` 配置和 Go 字段改名为 `admin_host/admin_port`。
+3. 把 GameServer 的 `api_host/api_port` 配置和 Go 字段改名为 `admin_host/admin_port`，同步机械替换 `gameserver/bootstrap.go` 中的字段引用，并将默认管理端口改为 `8082`，保证本步骤结束时 GameServer 包可编译。登录组件与路由的删除仍在 LS-03 完成。
 4. 保留 GameServer 所需的 WS、MySQL、Redis 节点上报、玩家归属、玩法和管理配置。
 5. 新增 `internal/app/loginserver/config.go`，只声明 HTTP、ticket issuer 和 Redis 读取字段。
 6. 新增 `loginserver.local/staging/prod.yaml`，本地默认监听 `0.0.0.0:8080`。
@@ -430,18 +435,20 @@ Redis 中没有健康、非 drain、未满载节点时：
 8. 不增加旧配置路径和旧字段名兼容逻辑。
 9. 为正常加载和关键配置缺失补充聚焦测试。
 
+涉及文件：`configs/` 六份进程配置、`internal/app/gameserver/config.go`、`internal/app/gameserver/bootstrap.go`、`internal/app/loginserver/config.go` 及配置测试。
+
 完成条件：
 
-- [ ] 六份进程配置职责明确。
-- [ ] LoginServer 配置不包含 MySQL、WS、玩法或 GameServer 节点身份。
-- [ ] 旧 `configs/config.*.yaml` 已删除且没有 fallback。
-- [ ] 配置聚焦测试通过。
+- [x] 六份进程配置职责明确。
+- [x] LoginServer 配置不包含 MySQL、WS、玩法或 GameServer 节点身份。
+- [x] 旧 `configs/config.*.yaml` 已删除且没有 fallback。
+- [x] 配置聚焦测试通过。
 
 ### 10.3 LS-02 实现独立 LoginServer
 
 - 优先级：`P0`
 - 依赖：`LS-01`
-- 状态：`TODO`
+- 状态：`DONE`
 
 执行步骤：
 
@@ -469,17 +476,17 @@ internal/app/loginserver/config.go
 
 完成条件：
 
-- [ ] `cmd/loginserver` 可以独立编译、启动和停止。
-- [ ] LoginServer 不导入 GameServer、玩法、Repository 或 MySQL 包。
-- [ ] `/api/login` 和 `/healthz` 可访问。
-- [ ] Bootstrap 或监听失败时已创建资源会被释放。
-- [ ] 聚焦测试通过。
+- [x] `cmd/loginserver` 可以独立编译、启动和停止。
+- [x] LoginServer 不导入 GameServer、玩法、Repository 或 MySQL 包。
+- [x] `/api/login` 和 `/healthz` 可访问。
+- [x] Bootstrap 或监听失败时已创建资源会被释放。
+- [x] 聚焦测试通过。
 
 ### 10.4 LS-03 移除 GameServer 登录职责
 
 - 优先级：`P0`
 - 依赖：`LS-02`
-- 状态：`TODO`
+- 状态：`DONE`
 
 执行步骤：
 
@@ -487,11 +494,12 @@ internal/app/loginserver/config.go
 2. 删除 `buildAPIMux` 的 `login.Provider` 参数。
 3. 删除 GameServer HTTP mux 中的 `/api/login` 路由。
 4. 保留 `/healthz`、`/metricsz` 和 `/admin/*`。
-5. 使用 `admin_host/admin_port` 构造 GameServer 管理 HTTP 地址。
+5. 保持 LS-01 已切换的 `admin_host/admin_port`，同步应用生命周期中的管理 HTTP 字段、日志和注释。
 6. 保留 `auth.Verifier`、Redis 节点注册、玩家归属、顶号和 WS 逻辑。
 7. 保留 `repo.Migrate(gdb)`，不在本步骤拆迁移命令。
 8. 删除不再使用的 import、字段和参数，不保留兼容空壳。
 9. 调整聚焦测试，确认 GameServer `/api/login` 返回 404。
+10. 将 `scripts/monitoring/metrics_dashboard/main.go` 默认指标地址改为 `8082/metricsz`；在 LS-04 验证不指定 `-url` 的默认命令。
 
 涉及文件：
 
@@ -499,21 +507,23 @@ internal/app/loginserver/config.go
 internal/app/gameserver/bootstrap.go
 internal/app/gameserver/admin_http.go
 internal/app/gameserver/config.go
+internal/app/gameserver/lifecycle.go
+scripts/monitoring/metrics_dashboard/main.go
 相关 GameServer 测试
 ```
 
 完成条件：
 
-- [ ] GameServer 不再创建 `login.Service` 或 TicketIssuer。
-- [ ] GameServer 管理端口的 `/api/login` 返回 404。
-- [ ] GameServer 仍能注册节点、监听 WS 并验证 LoginServer 签发的 ticket。
-- [ ] 聚焦测试通过。
+- [x] GameServer 不再创建 `login.Service` 或 TicketIssuer。
+- [x] GameServer 管理端口的 `/api/login` 返回 404。
+- [x] GameServer 仍能注册节点、监听 WS 并验证 LoginServer 签发的 ticket。
+- [x] 聚焦测试通过。
 
 ### 10.5 LS-04 完成单节点集成验收
 
 - 优先级：`P0`
 - 依赖：`LS-03`
-- 状态：`TODO`
+- 状态：`DONE`
 
 执行步骤：
 
@@ -526,18 +536,22 @@ internal/app/gameserver/config.go
 7. 确认收到 `auth_ack`，再执行现有主链路 smoke。
 8. 检查 GameServer 管理端口的健康、指标和管理路由。
 9. 检查 GameServer 管理端口不再提供 `/api/login`。
+10. 验证错误密钥、篡改 claims（保留原签名）和重复消费同一 ticket 均被拒绝；只有 `auth_ack.payload.ok=true` 才算鉴权成功。
+11. 执行 `go run ./scripts/monitoring/metrics_dashboard -once`，验证默认指标地址可用。
+
+涉及文件：新增 `scripts/loadtest/loginserver_split/main_test.go` 保存可重复执行的进程集成验收；默认跳过，显式设置 `LOGIN_SPLIT_TEST_DB_DSN` 后运行。测试使用独立本地测试库、临时 Redis 进程和临时配置，停止与故障注入只作用于测试启动的进程。现有玩法 smoke 直接复用，不修改玩法逻辑。
 
 完成条件：
 
-- [ ] 第 11.3 节全部验收项通过。
-- [ ] 登录响应和 WS 鉴权协议未改变。
-- [ ] 现有玩法 smoke 通过。
+- [x] 第 11.3 节全部验收项通过。
+- [x] 登录响应和 WS 鉴权协议未改变。
+- [x] 现有玩法 smoke 通过。
 
 ### 10.6 LS-05 完成双节点分配验收
 
 - 优先级：`P0`
 - 依赖：`LS-04`
-- 状态：`TODO`
+- 状态：`DONE`
 
 执行步骤：
 
@@ -551,18 +565,22 @@ internal/app/gameserver/config.go
 8. 对异常退出场景等待节点 TTL，确认过期节点被排除。
 9. 确认 LoginServer 无需重启即可感知节点增减。
 10. 验收后删除不属于正式配置集的临时文件。
+11. 使用 LoginServer 签发给 A 的 ticket 直连 B，确认被拒绝，再直连 A，确认仍可成功鉴权（错服请求不能消费正确节点的 nonce）。
+12. 执行满载、Redis 不可用、无节点和停止 LoginServer 后存量 WS 仍可请求的故障验收。
+
+涉及文件：扩展 `scripts/loadtest/loginserver_split/main_test.go`；验收配置仅生成到临时目录。drain/连接数由心跳传播，断言前须等待 Redis 中对应状态更新；异常退出则等待该节点记录的 TTL 到期。不要把心跳传播窗口误判为分配失败，也不在本任务修改心跳机制。
 
 完成条件：
 
-- [ ] 第 11.4 和第 11.5 节相关验收项通过。
-- [ ] 新增 GameServer 只需新配置和新进程，不需要修改代码。
-- [ ] 单节点 2000 连接硬上限仍由各 GameServer 独立执行。
+- [x] 第 11.4 和第 11.5 节相关验收项通过。
+- [x] 新增 GameServer 只需新配置和新进程，不需要修改代码。
+- [x] 单节点 2000 连接硬上限仍由各 GameServer 独立执行。
 
 ### 10.7 LS-06 同步架构和运维文档
 
 - 优先级：`P1`
 - 依赖：`LS-05`
-- 状态：`TODO`
+- 状态：`DONE`
 
 执行步骤：
 
@@ -575,15 +593,15 @@ internal/app/gameserver/config.go
 
 完成条件：
 
-- [ ] 权威文档不再描述 LoginServer 与 GameServer 同进程。
-- [ ] 新会话可以仅按 README 和 runbook 启动完整服务。
-- [ ] 产品总设计和玩法文档没有被加入技术实现细节。
+- [x] 权威文档不再描述 LoginServer 与 GameServer 同进程。
+- [x] 新会话可以仅按 README 和 runbook 启动完整服务。
+- [x] 产品总设计和玩法文档没有被加入技术实现细节。
 
 ### 10.8 LS-07 完成全量验证与提交
 
 - 优先级：`P1`
 - 依赖：`LS-06`
-- 状态：`TODO`
+- 状态：`DONE`
 
 执行步骤：
 
@@ -598,9 +616,9 @@ internal/app/gameserver/config.go
 
 完成条件：
 
-- [ ] 全量测试、vet 和 diff 检查通过。
-- [ ] 本任务只有一套最终实现口径。
-- [ ] 已本地提交且未 push。
+- [x] 全量测试、vet 和 diff 检查通过。
+- [x] 本任务只有一套最终实现口径。
+- [x] 已本地提交且未 push。
 
 ## 11. 测试要求
 
@@ -616,6 +634,8 @@ internal/app/gameserver/config.go
 6. 原节点不可用时仍能分配其他节点。
 7. 没有可用节点时返回受控错误。
 8. LoginServer HTTP 监听端口占用时 `Start` 返回错误。
+9. issuer 为空、ticket TTL 非正数或 Redis 关键配置为空时拒绝启动，不能用默认值掩盖显式错误配置。
+10. 票据错误密钥、claims 篡改、nonce 重放和目标节点不匹配均被拒绝。
 
 不要为简单构造函数逐个生成低价值测试。
 
@@ -646,6 +666,8 @@ GAME_CONFIG=configs/loginserver.local.yaml go run ./cmd/loginserver
 3. GameServer `http://127.0.0.1:8082/healthz` 可访问。
 4. GameServer `http://127.0.0.1:8082/api/login` 返回 404。
 5. 现有主链路 smoke 可以完成登录、WS 鉴权和玩法请求。
+6. 错误密钥、字段篡改和 nonce 重放均失败；成功响应必须为 `auth_ack` 且 `payload.ok=true`。
+7. 默认监控命令能从 `8082` 读取指标。
 
 ### 11.4 多节点验收
 
@@ -663,6 +685,7 @@ GAME_CONFIG=configs/loginserver.local.yaml go run ./cmd/loginserver
 3. 已有玩家重连时，原节点仍可用则优先返回原节点。
 4. 原节点进入 drain、满载或 TTL 过期后，登录分配到其他节点。
 5. 单节点 2000 连接硬上限仍由各 GameServer 独立执行。
+6. A 的 ticket 不能进入 B，且被 B 拒绝后仍能进入 A。
 
 ### 11.5 故障验收
 
@@ -676,18 +699,20 @@ GAME_CONFIG=configs/loginserver.local.yaml go run ./cmd/loginserver
 
 以下条件全部满足才可将任务标记为 `DONE`：
 
-- [ ] `cmd/loginserver` 可独立启动和停止。
-- [ ] GameServer 不再创建 LoginService。
-- [ ] GameServer 不再暴露 `/api/login`。
-- [ ] LoginServer 不依赖 MySQL、玩法 Service 或 WebSocket Server。
-- [ ] LoginServer 使用 Redis 实时节点表，不使用静态节点列表。
-- [ ] `enter_ticket` 的字段、签名和验签行为未改变。
-- [ ] 重连原服优先规则未改变。
-- [ ] 单节点集成验收通过。
-- [ ] 多节点分配验收通过。
-- [ ] `go test ./...` 通过。
-- [ ] `go vet ./...` 通过。
-- [ ] 启动与运维文档已同步。
+- [x] `cmd/loginserver` 可独立启动和停止。
+- [x] GameServer 不再创建 LoginService。
+- [x] GameServer 不再暴露 `/api/login`。
+- [x] LoginServer 不依赖 MySQL、玩法 Service 或 WebSocket Server。
+- [x] LoginServer 使用 Redis 实时节点表，不使用静态节点列表。
+- [x] `enter_ticket` 的字段、签名和验签行为未改变。
+- [x] 错误密钥、字段篡改、nonce 重放和错服票据验收通过。
+- [x] 默认监控脚本使用 GameServer 管理端口并验证通过。
+- [x] 重连原服优先规则未改变。
+- [x] 单节点集成验收通过。
+- [x] 多节点分配验收通过。
+- [x] `go test ./...` 通过。
+- [x] `go vet ./...` 通过。
+- [x] 启动与运维文档已同步。
 
 ## 13. 非目标
 
@@ -727,3 +752,47 @@ refactor: split loginserver from gameserver
 ```
 
 按项目约定，任务完成后可以本地提交；未经用户明确要求不得 push。
+
+## 16. 评审与执行记录
+
+### 2026-09-11 文档复核
+
+- 已修正 LS-01 字段重命名与 LS-03 引用更新的依赖矛盾，要求 LS-01 同步替换引用并通过包级配置测试。
+- 已补入监控默认端口迁移及默认命令验收，登录端口保持 8080。
+- 已补入错误密钥、claims 篡改、nonce 重放和错服票据的拒绝验收。
+- 已明确双节点为必需验收、共享配置一致性、心跳传播等待及测试进程隔离。
+- 文档门禁：通过。复用现有 allocator/ticket/auth/session，不扩展玩法或其他架构范围。
+
+### 实际验证结果
+
+环境：本地 Go、MySQL 8.4.11、Redis 8.0.1。使用本次单独创建的测试库和临时 Redis，不对已有开发服务注入故障；测试进程使用 LC_ALL=C 以避免本机无效 locale 导致 Redis 启动失败。
+
+| 阶段 | 验证与结果 |
+|---|---|
+| LS-01 | 两个应用包的配置聚焦测试通过，local/staging/prod 六份配置均可加载；无效 LoginServer 配置拒绝加载 |
+| LS-02 | LoginServer 包与入口编译、HTTP 路由、空密钥、端口占用与资源释放测试通过 |
+| LS-03 | GameServer 管理鉴权、健康、login 404、节点状态与监控规则聚焦测试通过 |
+| LS-04 | TestSingleNode 通过（4.69s）；真实登录、WS auth_ack、归属读写边界、管理接口、默认监控，以及 auth/biz/reconnect/prototype 四个既有 smoke 通过 |
+| 票据反向用例 | 错误密钥、uid/server_id/exp/nonce/issuer 五个字段分别篡改和 nonce 重放均拒绝；错服 ticket 被 B 拒绝后仍可进入正确 A |
+| LS-05 | TestMultiNode 通过（9.78s）；等负载分散、原服优先、drain、满载、正常注销、异常退出 TTL 和节点恢复通过，LoginServer 无需重启 |
+| 连接硬上限 | A/B 分别保持 2000 个真实 WS 连接槽，第 2001 个连接返回 HTTP 503 SERVER_FULL；节点满载上报后分配到另一节点 |
+| 故障边界 | 无节点或 Redis 不可用时登录返回受控失败；停止 LoginServer 后存量 WS 的玩家资料请求仍成功 |
+
+重跑真实进程验收：准备独立测试库并设置 LOGIN_SPLIT_TEST_DB_DSN，运行 `go test ./scripts/loadtest/loginserver_split -v -count=1`。单/双节点可分别使用 `-run '^TestSingleNode$'` 和 `-run '^TestMultiNode$'`。默认全量单元测试不启动这些进程。
+
+验证边界与非本任务记录：
+
+- 连接上限为短时准入验收，不代表正式 S1/S2/S3 性能压测；本次不重跑长时性能压测。
+- 双节点测试将心跳/TTL 设置为 1/3 秒，正式本地配置仍为 5/15 秒；等待真实 Redis 上报后再断言状态。
+- 首次建表后的默认监控曾报 DB P95 25ms 的既有告警。监控返回 2 表示已读取指标但有告警，不属于地址错误（返回 1）；最终单节点验收 DB P95 为 2ms、监控无告警，未调整数据库或告警阈值。
+- 历史压测报告和非本任务的运维文档中仍有旧配置名；不修改历史结果，也不扩展本次文档同步范围。
+
+### 最终验收
+
+- `go test ./...`：通过，同时设置 GAME_TEST_DB_DSN 指向本次隔离库，数据库指标集成测试通过；进程集成测试已在 LS-04/05 分别显式运行。
+- `go vet ./...`、gofmt 和 `git diff --check`：通过。
+- `go list -deps ./cmd/loginserver`：无 GameServer、domain/gameplay、Repository、MySQL/GORM 或 WS Server 依赖。
+- 最终代码验收：无阻塞项。复用登录/分配/签票实现，WS、玩家归属、业务事务和玩法代码未改变；无兼容空壳或额外中间层。
+- 旧三份混合配置已替换为六份进程配置，README、架构总览、技术架构和 runbook 已同步。
+- 测试服务和临时配置已清理；本次新建的隔离测试库已删除，测试数据未保留，已有开发 MySQL/Redis 服务保持运行。
+- 本地提交：`refactor: split loginserver from gameserver`；未执行 push。
