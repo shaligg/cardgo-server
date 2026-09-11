@@ -2,7 +2,7 @@
 
 ## 1. Start Services
 
-先确认 MySQL 开发库已创建、Redis 可用。GameServer 保留 AutoMigrate，只创建或调整表，不创建数据库。两个进程从仓库根目录启动：
+先确认 MySQL 开发库和当前所需表已准备、Redis 可用。开发阶段新增表或字段时直接在开发库执行 DDL；GameServer 启动只连接数据库，不创建或调整表。完整建表 SQL 在首次上线前统一整理。两个进程从仓库根目录启动：
 
 终端 1：启动 GameServer，注册 node-a。
 

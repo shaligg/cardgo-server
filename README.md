@@ -69,7 +69,7 @@ go build -o bin/gameserver ./cmd/gameserver
 go build -o bin/loginserver ./cmd/loginserver
 ```
 
-Start GameServer in terminal 1 (create the MySQL database first and start Redis):
+Start GameServer in terminal 1 (prepare the current development tables manually and start Redis first; GameServer never creates or alters tables):
 
 ```bash
 export GAME_DB_DSN='game:password@tcp(127.0.0.1:3306)/game_demo?charset=utf8mb4&parseTime=True&loc=Local'

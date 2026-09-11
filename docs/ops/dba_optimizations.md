@@ -90,7 +90,7 @@ type AssetLog struct {
 
 MySQL 分区表硬性要求**分区列必须出现在主键里**。分区属于生产数据库运维结构，不写进 GORM model tag，必须在第一次部署时作为 migration 单独执行。
 
-**Step 1**：正常跑 `AutoMigrate`（GORM 按单列 id PK 建表 + 建上面的所有索引/唯一约束）。
+**Step 1**：首次上线前根据最终 Model 整理并审核完整建表 SQL，独立创建单列 id 主键及上述索引/唯一约束；不得通过启动 GameServer 执行 `AutoMigrate`。
 
 **Step 2**：立刻执行 DBA migration SQL（改复合主键 + 建分区）：
 
@@ -381,7 +381,7 @@ pt-archiver \
 
 ## 4. MySQL 生产部署清单
 
-当前代码、配置和测试数据库口径统一为 MySQL，不再保留其他数据库驱动。数据库必须由部署系统预先创建，GameServer 只负责连接和迁移当前 MVP 表。
+当前代码、配置和测试数据库口径统一为 MySQL，不再保留其他数据库驱动。数据库及表结构必须在服务启动前独立准备，GameServer 只负责连接和业务读写，不执行 DDL。
 
 ### 4.1 首次部署的 5 步必做
 
@@ -389,8 +389,9 @@ pt-archiver \
 # Step 0: 通过密钥系统设置环境变量，不把账号密码写入 YAML
 export GAME_DB_DSN='game:password@tcp(mysql-host:3306)/game_db?charset=utf8mb4&parseTime=True&loc=Local&timeout=5s&readTimeout=3s&writeTimeout=3s'
 
-# Step 1: 启动 gameserver，AutoMigrate 建表（此时 asset_log 是单列 PK，已建好 3 个复合索引 idx_uid_created/idx_reason_created/idx_itemid_created + 2 个单列索引 req_id/created_at）
-#    必须保证新实例无玩家请求接入（LB 先不挂），否则 ALTER TABLE 改主键时锁表。
+# Step 1: 首次上线前整理、审核并独立执行最终建表 SQL
+#    此时 asset_log 是单列 PK，已建好 3 个复合索引 idx_uid_created/idx_reason_created/idx_itemid_created + 2 个单列索引 req_id/created_at。
+#    GameServer 尚未启动，不通过业务进程执行 AutoMigrate。
 
 # Step 2: 对空表执行 MySQL 专属 migration（见 §1.2.1）：
 #   2a) ALTER TABLE asset_log DROP PRIMARY KEY, ADD PRIMARY KEY(id, created_at);

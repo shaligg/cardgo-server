@@ -7,9 +7,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// Migrate 自动迁移当前 MVP 需要的数据库表。
+// Migrate 显式准备当前开发和测试需要的数据库表。
 //
-// 正式环境可以替换为独立迁移工具，Demo 阶段由启动流程调用此函数。
+// 业务进程启动时不得调用；正式环境的完整建表 SQL 在上线前单独准备和执行。
 func Migrate(db *gorm.DB) error {
 	if db == nil {
 		return fmt.Errorf("database is nil")

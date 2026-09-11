@@ -25,10 +25,13 @@ import (
 	"github.com/bigfish/go_orm_1/internal/app/loginserver"
 	"github.com/bigfish/go_orm_1/internal/platform/auth"
 	"github.com/bigfish/go_orm_1/internal/platform/login"
+	"github.com/bigfish/go_orm_1/internal/repo"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	goredis "github.com/redis/go-redis/v9"
 	"gopkg.in/yaml.v3"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 type process struct {
@@ -55,6 +58,7 @@ func newCluster(t *testing.T) *cluster {
 	if dsn == "" {
 		t.Skip("未设置 LOGIN_SPLIT_TEST_DB_DSN，跳过真实进程验收")
 	}
+	prepareGameSchema(t, dsn)
 	// 固定端口用于复用现有 smoke；若被占用直接失败，避免触碰已有服务。
 	for _, port := range []string{"8080", "8081", "8082", "8091", "8092"} {
 		listener, err := net.Listen("tcp", "127.0.0.1:"+port)
@@ -97,6 +101,25 @@ func newCluster(t *testing.T) *cluster {
 	c.loginConfig.Redis.Addr = redisAddr
 	c.loginConfig.Redis.PasswordEnvKey = ""
 	return c
+}
+
+// prepareGameSchema 只为显式指定的集成测试库准备表，业务进程本身不执行 DDL。
+func prepareGameSchema(t *testing.T, dsn string) {
+	t.Helper()
+	gdb, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("连接 LoginServer 拆分测试库失败: %v", err)
+	}
+	if err := repo.Migrate(gdb); err != nil {
+		t.Fatalf("准备 LoginServer 拆分测试表失败: %v", err)
+	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("获取 LoginServer 拆分测试连接池失败: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("关闭 LoginServer 拆分测试连接池失败: %v", err)
+	}
 }
 
 func (c *cluster) run(name string, args ...string) []byte {

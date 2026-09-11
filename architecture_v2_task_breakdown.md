@@ -263,6 +263,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 22. DONE：将公会权限、成员状态、会长转让和解散规则从 `DBGuildRepository` 上移到 `globalcore.LocalGuildService`；Repository 仅保留事务内锁行、查询、CRUD 和约束冲突转换。
 23. TODO（上线前）：完成正式账号域。自有 LoginService 建立 `accounts` 账号主表和 `account_identities` 登录身份映射，以内部稳定 UID 关联 `players`；支持游客或平台身份、账号状态、第三方凭证校验，以及 `account_token/refresh_token` 的签发、续期和失效。正式接口不得再把客户端提交的 `account` 直接当作 UID。若上线时接入的外部账号平台已完整提供稳定 UID、身份绑定和 Token 撤销能力，则本地以账号适配器替代，不重复建设账号表。
 24. DONE：将好友申请方向、重复关系和状态流转规则从 `DBFriendRepository` 上移到 `globalcore.LocalFriendService`；Repository 仅保留查询、锁行和 CRUD，审批事务由 Service 统一管理。
+25. DONE：GameServer 启动链路已删除 `repo.Migrate`，LoginServer 与 GameServer 均不执行 DDL；开发与隔离测试按需显式准备表，完整建表 SQL 留到首次上线前统一整理和审核。
 
 ## 8. 卡牌 MVP 后续任务拆分
 
@@ -385,7 +386,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 16. DONE：补齐 `internal/globalcore` 的 Friend/Mail/Notice 初始接口契约；Friend 后续已在“当前后续任务”第 16 项升级为完整基础闭环。
 17. DONE：删除旧 `WorldService` 公告口径，公告统一收敛到 `NoticeService`，避免公共领域核心出现两套命名。
 18. DONE：将原 `internal/game` 按职责拆为 `internal/domain` 与 `internal/gameplay`；只调整目录和依赖口径，不改变协议、业务逻辑或事务边界。
-19. DONE：按业务聚合拆分数据库实现：`DBPlayerRepository` 只保留玩家资料，资产、卡牌/卡组、关卡进度、工坊、好友、公会和聊天分别使用独立 Repository；数据库迁移改为包级 `repo.Migrate`，不保留旧万能仓储兼容入口。
+19. DONE：按业务聚合拆分数据库实现：`DBPlayerRepository` 只保留玩家资料，资产、卡牌/卡组、关卡进度、工坊、好友、公会和聊天分别使用独立 Repository；开发与测试可显式调用包级 `repo.Migrate` 准备表，业务进程启动不执行 DDL；不保留旧万能仓储兼容入口。
 20. DONE：收口资产层职责：`AssetService` 统一计算余额并判断资产不足，`DBAssetRepository` 只执行事务内读取、保存和资产流水写入；单项与多项资产变更统一由 Service 管理事务。
 21. DONE：收口工坊层职责：默认工坊和离线收益领取规则统一由 `WorkshopService` 决定，`DBWorkshopRepository` 只负责查询、幂等创建及保存最终状态，并删除未使用的独立领取事务入口。
 22. DONE：收口卡牌层职责：初始卡牌数据、默认卡组激活和卡牌等级上限统一由 `CardService` 决定，`DBCardRepository` 只负责幂等创建、序列化及保存 Service 已经计算完成的数据。

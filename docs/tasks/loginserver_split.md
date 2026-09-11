@@ -342,7 +342,7 @@ HTTP Server Shutdown
 
 ### 8.3 GameServer Bootstrap
 
-保持原有业务装配顺序，只删除 LoginServer 相关构造和路由依赖。`repo.Migrate(gdb)` 暂时继续保留在 GameServer；独立迁移命令是后续任务，不能在本任务顺手处理。
+本任务实施时保持原有业务装配顺序，只删除 LoginServer 相关构造和路由依赖，当时未顺手处理 `repo.Migrate(gdb)`。后续架构任务已将该调用从 GameServer 启动链路移除，当前业务进程不执行 DDL。
 
 ## 9. 请求流程
 
@@ -496,7 +496,7 @@ internal/app/loginserver/config.go
 4. 保留 `/healthz`、`/metricsz` 和 `/admin/*`。
 5. 保持 LS-01 已切换的 `admin_host/admin_port`，同步应用生命周期中的管理 HTTP 字段、日志和注释。
 6. 保留 `auth.Verifier`、Redis 节点注册、玩家归属、顶号和 WS 逻辑。
-7. 保留 `repo.Migrate(gdb)`，不在本步骤拆迁移命令。
+7. 本步骤当时保留 `repo.Migrate(gdb)`，未混入登录拆分；后续独立任务已从 GameServer 启动链路移除该调用。
 8. 删除不再使用的 import、字段和参数，不保留兼容空壳。
 9. 调整聚焦测试，确认 GameServer `/api/login` 返回 404。
 10. 将 `scripts/monitoring/metrics_dashboard/main.go` 默认指标地址改为 `8082/metricsz`；在 LS-04 验证不指定 `-url` 的默认命令。

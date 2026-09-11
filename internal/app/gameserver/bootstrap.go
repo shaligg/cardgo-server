@@ -113,9 +113,6 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 			ilog.Errorf("close redis after bootstrap failure: %v", err)
 		}
 	}()
-	if err := repo.Migrate(gdb); err != nil {
-		return nil, err
-	}
 	playerRepo := repo.NewDBPlayerRepository(gdb)
 	assetRepo := repo.NewDBAssetRepository(gdb)
 	cardRepo := repo.NewDBCardRepository(gdb)
