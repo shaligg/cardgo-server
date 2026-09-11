@@ -54,7 +54,6 @@ var ErrLevelProgressNotFound = errors.New("level progress not found")
 
 // 社交仓储查询和数据库约束转换使用的错误。
 var (
-	ErrSocialPlayerNotFound     = errors.New("player not found")
 	ErrGuildNameTaken           = errors.New("guild name already exists")
 	ErrGuildNotFound            = errors.New("guild not found")
 	ErrAlreadyInGuild           = errors.New("player already belongs to a guild")
@@ -104,9 +103,6 @@ type GuildRecord struct {
 // GuildApplicationRecord 是待审批入会申请的仓储 DTO。
 type GuildApplicationRecord struct {
 	UID       string
-	Level     int
-	Nickname  string
-	AvatarID  int64
 	CreatedAt int64
 }
 

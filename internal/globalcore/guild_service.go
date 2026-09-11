@@ -58,6 +58,7 @@ type GuildService interface {
 // LocalGuildService 是公会领域的同进程实现。
 type LocalGuildService struct {
 	Repo     *repo.DBGuildRepository
+	Players  *repo.DBPlayerRepository
 	Messages *repo.DBChatRepository
 	Tx       idb.TxManager
 }
@@ -72,8 +73,8 @@ func (s LocalGuildService) Create(ctx context.Context, uid string, name string, 
 		return GuildInfo{}, ErrInvalidGuildName
 	}
 	guildID := uuid.NewString()
-	err := s.withTransaction(ctx, func(store *repo.DBGuildRepository, _ *repo.DBChatRepository) error {
-		if err := store.LockPlayer(ctx, uid); err != nil {
+	err := s.withTransaction(ctx, func(store *repo.DBGuildRepository, players *repo.DBPlayerRepository, _ *repo.DBChatRepository) error {
+		if err := lockGuildPlayers(ctx, players, uid); err != nil {
 			return err
 		}
 		if _, err := store.GetMembership(ctx, uid); err == nil {
@@ -146,6 +147,9 @@ func (s LocalGuildService) ListApplications(ctx context.Context, operatorUID str
 	if s.Repo == nil {
 		return nil, "", fmt.Errorf("guild repository is nil")
 	}
+	if s.Players == nil {
+		return nil, "", fmt.Errorf("player repository is nil")
+	}
 	operator, err := s.Repo.GetMembership(ctx, operatorUID)
 	if err != nil || operator.GuildID != guildID || operator.Role != repo.GuildRoleLeader {
 		if err != nil && !errors.Is(err, repo.ErrNotGuildMember) {
@@ -157,13 +161,25 @@ func (s LocalGuildService) ListApplications(ctx context.Context, operatorUID str
 	if err != nil {
 		return nil, "", err
 	}
+	uids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		uids = append(uids, row.UID)
+	}
+	profiles, err := s.Players.GetByUIDs(ctx, uids)
+	if err != nil {
+		return nil, "", err
+	}
 	items := make([]GuildApplication, 0, len(rows))
 	for _, row := range rows {
+		profile, ok := profiles[row.UID]
+		if !ok {
+			return nil, "", fmt.Errorf("%w: %s", ErrPlayerNotFound, row.UID)
+		}
 		items = append(items, GuildApplication{
 			UID:       row.UID,
-			Level:     row.Level,
-			Nickname:  row.Nickname,
-			AvatarID:  row.AvatarID,
+			Level:     profile.Level,
+			Nickname:  profile.Nickname,
+			AvatarID:  profile.AvatarID,
 			CreatedAt: row.CreatedAt,
 		})
 	}
@@ -179,8 +195,8 @@ func (s LocalGuildService) ApplyJoin(ctx context.Context, uid string, guildID st
 	if guildID == "" {
 		return ErrGuildNotFound
 	}
-	return s.withTransaction(ctx, func(store *repo.DBGuildRepository, _ *repo.DBChatRepository) error {
-		if err := store.LockPlayer(ctx, uid); err != nil {
+	return s.withTransaction(ctx, func(store *repo.DBGuildRepository, players *repo.DBPlayerRepository, _ *repo.DBChatRepository) error {
+		if err := lockGuildPlayers(ctx, players, uid); err != nil {
 			return err
 		}
 		if err := store.LockGuild(ctx, guildID); err != nil {
@@ -205,8 +221,8 @@ func (s LocalGuildService) ApproveJoin(ctx context.Context, operatorUID string, 
 	if guildID == "" || targetUID == "" || operatorUID == targetUID {
 		return ErrGuildApplicationNotFound
 	}
-	return s.withTransaction(ctx, func(store *repo.DBGuildRepository, _ *repo.DBChatRepository) error {
-		if err := lockGuildPlayers(ctx, store, operatorUID, targetUID); err != nil {
+	return s.withTransaction(ctx, func(store *repo.DBGuildRepository, players *repo.DBPlayerRepository, _ *repo.DBChatRepository) error {
+		if err := lockGuildPlayers(ctx, players, operatorUID, targetUID); err != nil {
 			return err
 		}
 		if err := store.LockGuild(ctx, guildID); err != nil {
@@ -238,8 +254,8 @@ func (s LocalGuildService) Leave(ctx context.Context, uid string, reqID string) 
 	if err := requireReqID(reqID); err != nil {
 		return err
 	}
-	return s.withTransaction(ctx, func(store *repo.DBGuildRepository, messages *repo.DBChatRepository) error {
-		if err := store.LockPlayer(ctx, uid); err != nil {
+	return s.withTransaction(ctx, func(store *repo.DBGuildRepository, players *repo.DBPlayerRepository, messages *repo.DBChatRepository) error {
+		if err := lockGuildPlayers(ctx, players, uid); err != nil {
 			return err
 		}
 		membership, err := store.GetMembership(ctx, uid)
@@ -271,27 +287,33 @@ func (s LocalGuildService) Leave(ctx context.Context, uid string, reqID string) 
 }
 
 // withTransaction 为一次公会命令提供统一事务边界和事务内 Repository。
-func (s LocalGuildService) withTransaction(ctx context.Context, fn func(*repo.DBGuildRepository, *repo.DBChatRepository) error) error {
+func (s LocalGuildService) withTransaction(ctx context.Context, fn func(*repo.DBGuildRepository, *repo.DBPlayerRepository, *repo.DBChatRepository) error) error {
 	if s.Repo == nil {
 		return fmt.Errorf("guild repository is nil")
+	}
+	if s.Players == nil {
+		return fmt.Errorf("player repository is nil")
 	}
 	return s.Tx.Do(ctx, func(tx *gorm.DB) error {
 		var messages *repo.DBChatRepository
 		if s.Messages != nil {
 			messages = s.Messages.WithTx(tx)
 		}
-		return fn(s.Repo.WithTx(tx), messages)
+		return fn(s.Repo.WithTx(tx), s.Players.WithTx(tx), messages)
 	})
 }
 
 // lockGuildPlayers 按固定 UID 顺序加锁，避免多玩家命令出现相反锁序。
-func lockGuildPlayers(ctx context.Context, store *repo.DBGuildRepository, uids ...string) error {
+func lockGuildPlayers(ctx context.Context, players *repo.DBPlayerRepository, uids ...string) error {
 	sort.Strings(uids)
 	for i, uid := range uids {
 		if i > 0 && uid == uids[i-1] {
 			continue
 		}
-		if err := store.LockPlayer(ctx, uid); err != nil {
+		if err := players.LockByUID(ctx, uid); err != nil {
+			if errors.Is(err, repo.ErrPlayerNotFound) {
+				return ErrPlayerNotFound
+			}
 			return err
 		}
 	}

@@ -28,19 +28,6 @@ func (r *DBGuildRepository) WithTx(tx *gorm.DB) *DBGuildRepository {
 	return &DBGuildRepository{db: tx}
 }
 
-// LockPlayer 锁定玩家基础行，串行化同一玩家跨节点的公会成员变更。
-func (r *DBGuildRepository) LockPlayer(ctx context.Context, uid string) error {
-	var player model.Player
-	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("uid").Where("uid = ?", uid).Take(&player).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrSocialPlayerNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("lock guild player: %w", err)
-	}
-	return nil
-}
-
 // LockGuild 锁定公会主体行，避免审批、退出与解散交叉提交。
 func (r *DBGuildRepository) LockGuild(ctx context.Context, guildID string) error {
 	var guild model.Guild
@@ -247,25 +234,10 @@ func (r *DBGuildRepository) ListGuildApplications(ctx context.Context, guildID s
 		rows = rows[:limit]
 		nextCursor = rows[len(rows)-1].ID
 	}
-	uids := make([]string, 0, len(rows))
-	for _, row := range rows {
-		uids = append(uids, row.UID)
-	}
-	profiles, err := playerProfiles(ctx, r.db, uids)
-	if err != nil {
-		return nil, 0, err
-	}
 	result := make([]GuildApplicationRecord, 0, len(rows))
 	for _, row := range rows {
-		profile, ok := profiles[row.UID]
-		if !ok {
-			return nil, 0, fmt.Errorf("%w: %s", ErrSocialPlayerNotFound, row.UID)
-		}
 		result = append(result, GuildApplicationRecord{
 			UID:       row.UID,
-			Level:     profile.Level,
-			Nickname:  profile.Nickname,
-			AvatarID:  profile.AvatarID,
 			CreatedAt: row.CreatedAt.Unix(),
 		})
 	}

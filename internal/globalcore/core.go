@@ -11,7 +11,7 @@ var (
 	ErrInvalidReqID             = repo.ErrInvalidReqID
 	ErrInvalidCursor            = errors.New("invalid cursor")
 	ErrInvalidListLimit         = errors.New("invalid list limit")
-	ErrPlayerNotFound           = repo.ErrSocialPlayerNotFound
+	ErrPlayerNotFound           = repo.ErrPlayerNotFound
 	ErrCannotFriendSelf         = errors.New("cannot add self as friend")
 	ErrFriendRequestExists      = errors.New("friend request already exists")
 	ErrFriendRequestNotFound    = errors.New("friend request not found")

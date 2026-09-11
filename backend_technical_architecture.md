@@ -594,7 +594,7 @@ GameServer Handler
 - 资产数量合法性、当前余额计算和余额不足判断由 `domain/asset.Service` 负责；`DBAssetRepository` 只在 Service 建立的事务中读取当前资产、保存计算后的余额并写资产流水。
 - 初始卡牌等级与数量、默认卡组激活规则和卡牌等级上限由 `gameplay/card.Service` 决定；`DBCardRepository` 只幂等创建或保存 Service 已经计算完成的卡牌与卡组数据。
 - 工坊默认等级、默认主题、离线收益计算及是否推进领取时间由 `gameplay/workshop.Service` 决定；`DBWorkshopRepository` 只查询、幂等创建和保存 Service 已经计算完成的工坊数据。
-- 公会创建、申请、审批、退出、会长转让和解散规则由 `globalcore.LocalGuildService` 判断并通过 `TxManager` 统一事务；解散时由 Service 显式协调 `DBGuildRepository` 与 `DBChatRepository` 清理公会数据和频道历史，任何 Repository 都不能跨领域直接操作其他模块的数据表。未来拆为远程公会服时，GameServer 只把 `GuildService` 的本地实现替换为 `RemoteGuildClient`，远端继续复用同一套公会规则。
+- 公会创建、申请、审批、退出、会长转让和解散规则由 `globalcore.LocalGuildService` 判断并通过 `TxManager` 统一事务；玩家行锁和申请人资料由 Service 调用 `DBPlayerRepository`，解散时由 Service 协调 `DBGuildRepository` 与 `DBChatRepository`，任何 Repository 都不能跨领域直接操作其他模块的数据表。未来拆为远程公会服时，GameServer 只把 `GuildService` 的本地实现替换为 `RemoteGuildClient`，远端继续复用同一套公会规则。
 - 好友申请、申请方向、重复关系和状态流转由 `globalcore.LocalFriendService` 判断；目标玩家校验和列表资料补全由 Service 调用 `DBPlayerRepository` 完成，`DBFriendRepository` 只访问好友关系表并提供关系查询、锁行和 CRUD，审批事务由 Service 通过 `TxManager` 管理。
 - 数据库表迁移由包级 `repo.Migrate` 负责，不挂在任何业务 Repository 上，避免启动职责依附于某个领域仓储。
 

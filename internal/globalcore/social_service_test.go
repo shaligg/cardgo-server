@@ -63,7 +63,7 @@ func TestLocalFriendServiceRejectsInvalidRelation(t *testing.T) {
 
 func TestLocalGuildAndChatLifecycle(t *testing.T) {
 	dbRepo := newSocialRepository(t, "guild_owner", "guild_member", "guild_outsider")
-	guilds := LocalGuildService{Repo: dbRepo.DBGuildRepository, Messages: dbRepo.DBChatRepository, Tx: dbRepo.Tx}
+	guilds := LocalGuildService{Repo: dbRepo.DBGuildRepository, Players: dbRepo.DBPlayerRepository, Messages: dbRepo.DBChatRepository, Tx: dbRepo.Tx}
 	chat := LocalChatService{Messages: dbRepo, Membership: dbRepo}
 	ctx := context.Background()
 
