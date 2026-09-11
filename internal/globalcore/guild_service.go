@@ -57,8 +57,9 @@ type GuildService interface {
 
 // LocalGuildService 是公会领域的同进程实现。
 type LocalGuildService struct {
-	Repo *repo.DBGuildRepository
-	Tx   idb.TxManager
+	Repo     *repo.DBGuildRepository
+	Messages *repo.DBChatRepository
+	Tx       idb.TxManager
 }
 
 // Create 创建公会并把当前玩家设为会长。
@@ -71,7 +72,7 @@ func (s LocalGuildService) Create(ctx context.Context, uid string, name string, 
 		return GuildInfo{}, ErrInvalidGuildName
 	}
 	guildID := uuid.NewString()
-	err := s.withTransaction(ctx, func(store *repo.DBGuildRepository) error {
+	err := s.withTransaction(ctx, func(store *repo.DBGuildRepository, _ *repo.DBChatRepository) error {
 		if err := store.LockPlayer(ctx, uid); err != nil {
 			return err
 		}
@@ -178,7 +179,7 @@ func (s LocalGuildService) ApplyJoin(ctx context.Context, uid string, guildID st
 	if guildID == "" {
 		return ErrGuildNotFound
 	}
-	return s.withTransaction(ctx, func(store *repo.DBGuildRepository) error {
+	return s.withTransaction(ctx, func(store *repo.DBGuildRepository, _ *repo.DBChatRepository) error {
 		if err := store.LockPlayer(ctx, uid); err != nil {
 			return err
 		}
@@ -204,7 +205,7 @@ func (s LocalGuildService) ApproveJoin(ctx context.Context, operatorUID string, 
 	if guildID == "" || targetUID == "" || operatorUID == targetUID {
 		return ErrGuildApplicationNotFound
 	}
-	return s.withTransaction(ctx, func(store *repo.DBGuildRepository) error {
+	return s.withTransaction(ctx, func(store *repo.DBGuildRepository, _ *repo.DBChatRepository) error {
 		if err := lockGuildPlayers(ctx, store, operatorUID, targetUID); err != nil {
 			return err
 		}
@@ -237,7 +238,7 @@ func (s LocalGuildService) Leave(ctx context.Context, uid string, reqID string) 
 	if err := requireReqID(reqID); err != nil {
 		return err
 	}
-	return s.withTransaction(ctx, func(store *repo.DBGuildRepository) error {
+	return s.withTransaction(ctx, func(store *repo.DBGuildRepository, messages *repo.DBChatRepository) error {
 		if err := store.LockPlayer(ctx, uid); err != nil {
 			return err
 		}
@@ -257,6 +258,12 @@ func (s LocalGuildService) Leave(ctx context.Context, uid string, reqID string) 
 			return err
 		}
 		if !found {
+			if messages == nil {
+				return fmt.Errorf("chat repository is nil")
+			}
+			if err := messages.DeleteChannelMessages(ctx, guildChatChannelID(membership.GuildID)); err != nil {
+				return err
+			}
 			return store.DeleteGuildData(ctx, membership.GuildID, uid)
 		}
 		return store.TransferGuildLeadershipData(ctx, membership.GuildID, uid, successor.UID)
@@ -264,12 +271,16 @@ func (s LocalGuildService) Leave(ctx context.Context, uid string, reqID string) 
 }
 
 // withTransaction 为一次公会命令提供统一事务边界和事务内 Repository。
-func (s LocalGuildService) withTransaction(ctx context.Context, fn func(*repo.DBGuildRepository) error) error {
+func (s LocalGuildService) withTransaction(ctx context.Context, fn func(*repo.DBGuildRepository, *repo.DBChatRepository) error) error {
 	if s.Repo == nil {
 		return fmt.Errorf("guild repository is nil")
 	}
 	return s.Tx.Do(ctx, func(tx *gorm.DB) error {
-		return fn(s.Repo.WithTx(tx))
+		var messages *repo.DBChatRepository
+		if s.Messages != nil {
+			messages = s.Messages.WithTx(tx)
+		}
+		return fn(s.Repo.WithTx(tx), messages)
 	})
 }
 

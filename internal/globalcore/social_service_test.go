@@ -63,7 +63,7 @@ func TestLocalFriendServiceRejectsInvalidRelation(t *testing.T) {
 
 func TestLocalGuildAndChatLifecycle(t *testing.T) {
 	dbRepo := newSocialRepository(t, "guild_owner", "guild_member", "guild_outsider")
-	guilds := LocalGuildService{Repo: dbRepo.DBGuildRepository, Tx: dbRepo.Tx}
+	guilds := LocalGuildService{Repo: dbRepo.DBGuildRepository, Messages: dbRepo.DBChatRepository, Tx: dbRepo.Tx}
 	chat := LocalChatService{Messages: dbRepo, Membership: dbRepo}
 	ctx := context.Background()
 
@@ -150,6 +150,17 @@ func TestLocalGuildAndChatLifecycle(t *testing.T) {
 	}
 	if detail.OwnerUID != "guild_member" || detail.MyRole != repo.GuildRoleLeader || detail.MemberCount != 1 {
 		t.Fatalf("transferred guild = %#v", detail)
+	}
+
+	if err := guilds.Leave(ctx, "guild_member", "guild-disband"); err != nil {
+		t.Fatalf("last member Leave: %v", err)
+	}
+	if _, err := guilds.Get(ctx, "guild_outsider", guild.GuildID); !errors.Is(err, ErrGuildNotFound) {
+		t.Fatalf("Get disbanded guild error = %v, want %v", err, ErrGuildNotFound)
+	}
+	messages, _, err := dbRepo.ListChatMessages(ctx, guildChatChannelID(guild.GuildID), 0, 20)
+	if err != nil || len(messages) != 0 {
+		t.Fatalf("guild messages after disband = %#v err=%v", messages, err)
 	}
 }
 

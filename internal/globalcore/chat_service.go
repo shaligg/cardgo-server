@@ -89,10 +89,15 @@ func (s LocalChatService) resolveChannel(ctx context.Context, channel string, ui
 		if err != nil {
 			return "", err
 		}
-		return "guild:" + guildID, nil
+		return guildChatChannelID(guildID), nil
 	default:
 		return "", ErrInvalidChatChannel
 	}
+}
+
+// guildChatChannelID 统一生成公会聊天使用的持久化频道 ID。
+func guildChatChannelID(guildID string) string {
+	return "guild:" + guildID
 }
 
 func toChatMessage(record repo.ChatMessageRecord) ChatMessage {

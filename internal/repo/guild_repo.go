@@ -173,13 +173,10 @@ func (r *DBGuildRepository) TransferGuildLeadershipData(ctx context.Context, gui
 	return r.RemoveGuildMemberData(ctx, oldUID)
 }
 
-// DeleteGuildData 删除空公会及其申请和聊天历史。
+// DeleteGuildData 删除空公会、待处理申请和最后一名成员。
 func (r *DBGuildRepository) DeleteGuildData(ctx context.Context, guildID string, leaderUID string) error {
 	if err := r.db.WithContext(ctx).Where("guild_id = ?", guildID).Delete(&model.GuildApplication{}).Error; err != nil {
 		return fmt.Errorf("delete guild applications: %w", err)
-	}
-	if err := r.db.WithContext(ctx).Where("channel_id = ?", "guild:"+guildID).Delete(&model.ChatMessage{}).Error; err != nil {
-		return fmt.Errorf("delete guild chat: %w", err)
 	}
 	if err := r.RemoveGuildMemberData(ctx, leaderUID); err != nil {
 		return err

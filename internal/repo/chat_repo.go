@@ -18,6 +18,11 @@ func NewDBChatRepository(db *gorm.DB) *DBChatRepository {
 	return &DBChatRepository{db: db}
 }
 
+// WithTx 返回绑定到指定事务的聊天仓储。
+func (r *DBChatRepository) WithTx(tx *gorm.DB) *DBChatRepository {
+	return &DBChatRepository{db: tx}
+}
+
 // CreateChatMessage 持久化一条聊天消息。
 func (r *DBChatRepository) CreateChatMessage(ctx context.Context, message ChatMessageRecord) (ChatMessageRecord, error) {
 	row := model.ChatMessage{
@@ -54,6 +59,14 @@ func (r *DBChatRepository) ListChatMessages(ctx context.Context, channelID strin
 		result[len(rows)-1-i] = toChatMessageRecord(row)
 	}
 	return result, nextCursor, nil
+}
+
+// DeleteChannelMessages 删除指定逻辑频道的全部历史消息。
+func (r *DBChatRepository) DeleteChannelMessages(ctx context.Context, channelID string) error {
+	if err := r.db.WithContext(ctx).Where("channel_id = ?", channelID).Delete(&model.ChatMessage{}).Error; err != nil {
+		return fmt.Errorf("delete channel messages: %w", err)
+	}
+	return nil
 }
 
 func toChatMessageRecord(row model.ChatMessage) ChatMessageRecord {
