@@ -398,7 +398,7 @@ export GAME_DB_DSN='game:password@tcp(mysql-host:3306)/game_db?charset=utf8mb4&p
 #   2c) 建 asset_log_archive（§1.3）+ asset_log_all VIEW（§1.4）;
 #   2d) 注册 evt_asset_log_monthly_maintenance（§1.5，event_scheduler=ON）。
 
-# Step 3: 核对 configs/config.prod.yaml 的连接池配置
+# Step 3: 核对 configs/gameserver.prod.yaml 的连接池配置（LoginServer 不连接 MySQL）
 #   max_open_conns: 100
 #   max_idle_conns: 30
 #   conn_max_lifetime_sec: 3600

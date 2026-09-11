@@ -14,9 +14,9 @@
 - `backend_technical_architecture.md`：后端技术架构细节。
 - `architecture_v2_task_breakdown.md`：基础架构与 Prototype 主链路落地记录。
 
-当前独立技术任务：
+独立技术任务：
 
-- [独立 LoginServer 拆分](tasks/loginserver_split.md)
+- [独立 LoginServer 拆分](tasks/loginserver_split.md)：DONE，保留范围与验收记录；当前双进程启动、配置和运维命令见 [runbook](ops/runbook.md)。
 
 维护规则：
 

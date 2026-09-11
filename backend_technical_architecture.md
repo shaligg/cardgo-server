@@ -909,7 +909,7 @@ Dispatcher 按 uid 串行
 5. 持久化：A 类数据在业务请求事务中直接写入 DB
 6. 广播：按房间/频道，避免高频全服广播
 7. 队列策略：每连接一个有界 FIFO 队列，队列满即关闭该慢客户端
-8. 资源隔离：`login` 与 `realtime` 使用独立 worker 池与限流器，避免互相挤压。
+8. 资源隔离：LoginServer 与 GameServer 分进程部署，HTTP 登录与 WS 业务不共享应用实例或进程内运行态。
 
 ### 8.1 BattleSession 索引与生命周期
 1. `BattleService` 是应用级共享实例，公共依赖只初始化一次；玩家之间不共享具体局内状态。
@@ -1378,7 +1378,7 @@ go_game_server/
 │   │   └── transport/
 │   │       ├── dto/
 │   │       └── errors/
-│   ├── platform/                   # 游戏平台能力，可后续独立为 login/session 服务
+│   ├── platform/                   # 游戏平台能力；login 由 LoginServer 组装，其余由 GameServer 组装
 │   │   ├── login/
 │   │   │   ├── handler.go
 │   │   │   ├── allocator.go

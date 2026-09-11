@@ -109,6 +109,11 @@ For another GameServer, use a unique `server.node_id`, WS/Admin ports and `serve
 ## Architecture
 
 ```
+Login (independent LoginServer):
+  Client -> HTTP :8080 -> Redis NodeAllocator -> TicketIssuer
+  Client <- ws_addr + server_id + enter_ticket
+
+GameServer (client connects directly to the assigned node):
 Client ──WS──▶ Gateway ──▶ Auth ──▶ Dispatcher (shard) ──▶ Router / Handler
                                                                   │
                  ┌────────────────────────────────────────────────┴──────────┐
@@ -124,6 +129,8 @@ Client ──WS──▶ Gateway ──▶ Auth ──▶ Dispatcher (shard) ─
                                      ▼
                                    MySQL
 ```
+
+See the [architecture overview](architecture_v2.md), [technical architecture](backend_technical_architecture.md) and [documentation index](docs/README.md).
 
 ## Tech Stack
 

@@ -49,7 +49,7 @@
   + 按未来多进程/服务拆分边界编码
 ```
 
-GameServer 业务仍采用模块化单体，登录入口已独立部署。
+LoginServer 与 GameServer 同仓库、独立构建和启动。单节点与多节点使用同一套登录分配链路，GameServer 业务仍采用模块化单体。
 
 目标是：
 
@@ -75,17 +75,25 @@ LoginServer 进程
 GameServer 进程
   - WebSocket Gateway
   - Auth / Session
+  - 管理 HTTP（健康、指标、drain、会话管理）
   - Dispatcher
   - Game Services
   - globalcore domain core
   - globalserver same-process jobs/service process boundary
   - State Manager
-  - Repository / Cache
+  - Repository / MySQL
   - Infra
 
 Redis
 DB
 ```
+
+进程边界：
+
+- LoginServer 只处理登录分配、签票和自身存活检查；读取 Redis 节点与最近归属，不注册为游戏节点，不创建玩家，也不连接 MySQL。
+- GameServer 负责验票、玩家初始化、会话和归属认领、玩法及持久化；管理 HTTP 不承载登录 API。
+- 两个进程分别持有配置和资源，共享票据签验契约及 Redis 节点/归属数据，不通过 LoginServer 转发游戏消息。
+- GameServer 增减节点通过 Redis 注册表被发现，无需重启 LoginServer。停止 LoginServer 会阻断新登录和重连换票，但不主动断开已有 GameServer 连接。
 
 Go 运行模型：
 
@@ -128,7 +136,8 @@ MVP 概述模块：
 
 | 模块 | MVP 职责概述 |
 |---|---|
-| 登录接入 | 账号进入、节点分配、发票、验票、会话建立 |
+| 登录入口（LoginServer） | Demo 账号接入、节点分配、票据签发 |
+| 实时接入（GameServer） | 票据校验、玩家准备、会话建立和归属认领 |
 | 玩家资料 | 建号、基础资料、等级、章节进度 |
 | 资产 | 金币、钻石、体力、声望、材料、碎片、统一发奖扣费 |
 | 背包 | 普通道具、材料、消耗券、宝箱等长期物品 |
@@ -225,6 +234,8 @@ globalserver/* 是公共服编排层，MVP 就可以有代码，但不独立启�
 
 ## 7. 核心分层
 
+以下为 GameServer 业务链路；LoginServer 的登录分配和签票不进入玩法、Repository 或 DB 层。
+
 ```text
 Gateway / Transport
   -> Handler / BizRouter
@@ -277,9 +288,11 @@ DB 持久化数据
 
 ## 9. 登录与重连原则
 
-登录分配由 `Login / NodeAllocator` 决定。
+登录分配由独立 LoginServer 内的 `Login / NodeAllocator` 决定。
 
-凭证分层：
+当前 Demo 直接把客户端提交的 `account` 作为 UID，只提供选服与 `enter_ticket` 签发；未实现密码/平台凭证校验、正式账号域或 `account_token / refresh_token`。独立进程不等于正式账号系统已经完成。
+
+正式账号系统的凭证分层（后续建设）：
 
 - `account_token / refresh_token` 证明“玩家是谁”，由登录/账号系统处理。
 - `enter_ticket` 证明“玩家本次可以进入哪台 GameServer”，由登录服选服后短期签发。
@@ -289,7 +302,7 @@ DB 持久化数据
 MVP 接入方案：
 
 ```text
-Client -> LoginService/NodeAllocator
+Client -> LoginServer（LoginService/NodeAllocator）
        <- server_id + GameServer ws_addr + enter_ticket
 Client -> GameServer gateway/ws
 ```
@@ -301,18 +314,19 @@ Client -> GameServer gateway/ws
 - `NodeAllocator` 是登录服内部的节点分配模块，不是独立进程。
 - `AccessGateway` 不进入 MVP 主链路，仅作为未来统一入口、隐藏源站和安全防护的演进方案。
 
-GameServer 只做：
+GameServer 接入顺序：
 
 ```text
-验证 ticket.server_id 是否等于自己
-验票成功后建立 session
-从正式业务表加载鉴权基础资料
-同节点短时重连可继续使用尚未清理的局内状态
+校验票据签名、签发方、有效期、目标节点及 nonce
+  -> 显式初始化或读取玩家基础资料
+  -> 绑定本地 session
+  -> 认领 Redis 玩家归属并处理旧连接/运行态
+  -> 返回鉴权成功和同步数据
 ```
 
 重连规则：
 
-- 优先分配回原 GameServer。
+- 原 GameServer 存活、非 drain 且未满载时优先回原服，否则选择其他可用节点；无可用节点或 Redis 读取失败时登录失败，不回退到静态节点。
 - Login 从 Redis 玩家归属读取最近节点，但不在签发 ticket 时改写归属。
 - GameServer 验票并绑定会话成功后，才原子更新 Redis `uid -> server_id + conn_id`。
 - 玩家长期数据始终从 DB 加载；如果 Redis 前一归属仍是本节点，可继续使用本机尚未清理的 `BattleSession` 和近期请求结果。
@@ -330,8 +344,9 @@ GameServer 只做：
 MVP 第一条主链路：
 
 ```text
-登录
-  -> 创建/读取玩家
+LoginServer 分配节点并签发票据
+  -> 客户端直连目标 GameServer 并提交票据
+  -> GameServer 验票、创建/读取玩家、建立会话与认领归属
   -> 获取玩家资料
   -> 开始关卡
   -> 出牌
@@ -351,16 +366,16 @@ MVP 第一条主链路：
 5. 工坊 MVP。
 6. Prototype 集成验收。
 
-## 11. 未来演进
+## 11. 当前运行形态与未来演进
 
-阶段 1：MVP
+当前默认：独立登录入口 + 单 GameServer
 
 ```text
 独立 LoginServer + 单 GameServer
 GameServer 内多 goroutine + 模块化单体
 ```
 
-阶段 2：多 GameServer
+当前已支持：同一登录入口 + 多 GameServer
 
 ```text
 独立单实例 LoginServer/Allocator
@@ -370,7 +385,9 @@ Redis 共享节点注册、玩家归属和控制通知
 DB 共享权威数据
 ```
 
-阶段 3：公共模块远程化或独立进程
+单、双 GameServer 的进程集成验收已完成；多节点接入能力不代表正式容量压测与生产发布验收完成。验收记录见 [独立 LoginServer 拆分](docs/tasks/loginserver_split.md)，启动与扩容操作见 [runbook](docs/ops/runbook.md)。
+
+后续演进：公共模块远程化或独立进程
 
 ```text
 GameServer
@@ -397,7 +414,7 @@ GlobalServer
 - 非迁移候选模块不为了形式统一而过度拆分，避免产生大量只有一个实现、一个调用方的无用接口。
 - LocalService 和 RemoteClient 只代表调用方式差异，不允许各自复制一套公共业务规则。
 
-阶段 4：按压力点拆分
+后续按压力点逐项拆分
 
 ```text
 ChatService
@@ -415,7 +432,8 @@ MailService
 
 MVP 不做：
 
-- 多节点候选服复杂分配。
+- 超出当前负载分配、原服优先及不可用节点避让的复杂选服策略。
+- LoginServer 多实例扩容与高可用。
 - 好友互助、参观和好友排行榜。
 - 私聊、聊天实时推送与聊天治理。
 - 公会签到、捐献、任务、商店和公会战。

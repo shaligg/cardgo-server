@@ -17,8 +17,8 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 2. 先主链路后扩展：优先打通登录模块、接入鉴权、会话、核心读写链路。
 3. 先可观测后优化：先保证可监控可回滚，再做性能细调。
 4. 单节点容量优先：先完成每个 GameServer 进程承载 2000 在线目标；节点注册和登录分配从一开始支持多节点，不提前拆微服务。
-5. 接口先行：登录模块与实时模块通过接口边界交互，后续可独立拆分。
-6. 部署拓扑：单节点 Demo 使用 `Login + GameServer` 单进程；增加第二个 GameServer 前，Login 拆成独立单实例服务，多个 GameServer 不重复承载 Login。
+5. 接口先行：LoginServer 与 GameServer 通过 ticket 和共享 Redis 节点/归属契约协作，不共享进程内运行态。
+6. 部署拓扑：单节点 Demo 与多节点均使用独立单实例 LoginServer，供一个或多个 GameServer 共享；GameServer 不承载 Login API。
 7. 一致性优先：先定义 A/B/C 数据分级与写入规则，再落代码。
 8. 全局域优先：`globalcore(Friend/Chat/Guild/Mail/Rank/Notice)` 作为公共领域核心，同进程先落地；`globalserver` 从 MVP 起建立公共服/job 编排边界，但初版不独立启动、不做网络传输层。
 9. 迁移白名单：只有技术文档“可迁移模块列表”中的模块才按可远程化边界实现，列表外默认简单本地实现。
@@ -71,7 +71,7 @@ MVP 范围口径以 [docs/design/mvp_scope.md](/Users/bigfish/Project/go_orm_1/d
 3. 定义模块依赖规则（禁止反向依赖、禁止跨层直连，`internal/pkg` 只能被引用，不能引用业务/框架/平台/仓储/基础设施）。
 4. 创建统一错误码、日志字段、trace_id 规范。
 5. 建立配置加载与环境注入机制。
-6. 完成 login/realtime 资源隔离骨架（独立 worker 池与限流配置）。
+6. 完成 login/realtime 资源隔离；当前由 LoginServer 与 GameServer 分进程装配，分别处理 HTTP 登录和 WS 业务。
 
 ### 交付物
 1. 工程目录骨架
@@ -253,7 +253,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 12. DONE：BattleSession 改为按 UID 索引，一个玩家最多保留一局运行态；未结算时禁止覆盖，结算后新开局替换旧运行态，旧 `session_id` 失效。
 13. DONE：删除没有任何发布或订阅调用方的进程内 EventBus；真实跨领域异步编排出现前只保留事件契约，不预建运行模块。
 14. DONE：删除没有实现和调用方的 `session.Store` 预留接口；当前会话由进程内 `Manager` 管理，跨节点只通过 Redis `PlayerOwnerStore` 保存归属。
-15. DONE：删除无人调用的 `SingleNodeAllocator`；单节点 Demo 与未来多节点统一使用 Redis `NodeRegistry` 驱动的 `RegistryNodeAllocator`。
+15. DONE：删除无人调用的 `SingleNodeAllocator`；单节点 Demo 与多节点统一使用 Redis `NodeRegistry` 驱动的 `RegistryNodeAllocator`。
 16. DONE：完成轻社交基础闭环：好友申请、公会成员生命周期、世界/公会聊天历史均接入 `globalcore -> repo -> MySQL`，并保留 LocalService/RemoteClient 替换边界。
 17. TODO：在独立压测机执行 P5 正式压测并回填容量结论。
 18. TODO：在预发环境执行 P6 灰度发布和故障注入演练，补充演练记录。
@@ -379,7 +379,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 10. DONE：新增 `EnvelopeCodec` 抽象，当前使用 `JSONEnvelopeCodec`，为后续 protobuf/binary 替换预留边界。
 11. DONE：将业务协议入口从 `internal/app` 迁移到 `internal/handler`，`app` 回归应用装配、生命周期和配置职责。
 12. DONE：将 gameserver 启动装配从 `internal/app` 迁移到 `internal/app/gameserver`，让应用层显式表达进程边界。
-13. DONE：拆出 `internal/app/gameserver/admin_http.go`，收敛 health、metrics、drain、sessions 和 login API 路由组装。
+13. DONE：拆出 `internal/app/gameserver/admin_http.go`，收敛 health、metrics、drain、sessions 路由组装；login API 后续已迁至独立 LoginServer，拆分记录见 [独立 LoginServer 拆分](docs/tasks/loginserver_split.md)。
 14. DONE：删除 `internal/game/chat`、`internal/game/guild`、`internal/game/rank` 空壳，避免公共领域能力和本地玩法目录边界混淆；后续聊天、公会、排行入口以 `globalcore/*` 为准。
 15. DONE：新增 `internal/globalserver` 最小契约包，先落地排行榜结算、批量邮件和通用 Job 接口；MVP 同进程直调，未来独立公共服时在接口外层增加 transport adapter。
 16. DONE：补齐 `internal/globalcore` 的 Friend/Mail/Notice 初始接口契约；Friend 后续已在“当前后续任务”第 16 项升级为完整基础闭环。
