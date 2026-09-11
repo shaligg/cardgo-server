@@ -9,6 +9,12 @@ server:
   drain_mode: false
   dispatcher_shards: 64
 
+auth:
+  issuer: "login-module"
+  algorithm: "hmac-sha256"
+  nonce_ttl_sec: 120
+  secret_env_key: "GAME_TICKET_SECRET"
+
 admin:
   require_auth: true
   token_env_key: "GAME_ADMIN_TOKEN"

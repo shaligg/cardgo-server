@@ -12,7 +12,8 @@ import (
 )
 
 func TestBuildAPIMuxProtectsManagementRoutes(t *testing.T) {
-	cfg := defaultConfig()
+	var cfg Config
+	cfg.Server.NodeID = "node-test"
 	cfg.Admin.RequireAuth = true
 	handler := buildAPIMux(
 		cfg,
@@ -45,7 +46,8 @@ func TestBuildAPIMuxProtectsManagementRoutes(t *testing.T) {
 }
 
 func TestBuildAPIMuxExposesHealthWithoutLogin(t *testing.T) {
-	cfg := defaultConfig()
+	var cfg Config
+	cfg.Server.NodeID = "node-test"
 	cfg.Admin.RequireAuth = true
 	handler := buildAPIMux(
 		cfg,

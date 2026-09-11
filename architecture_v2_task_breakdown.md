@@ -264,6 +264,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 23. TODO（上线前）：完成正式账号域。自有 LoginService 建立 `accounts` 账号主表和 `account_identities` 登录身份映射，以内部稳定 UID 关联 `players`；支持游客或平台身份、账号状态、第三方凭证校验，以及 `account_token/refresh_token` 的签发、续期和失效。正式接口不得再把客户端提交的 `account` 直接当作 UID。若上线时接入的外部账号平台已完整提供稳定 UID、身份绑定和 Token 撤销能力，则本地以账号适配器替代，不重复建设账号表。
 24. DONE：将好友申请方向、重复关系和状态流转规则从 `DBFriendRepository` 上移到 `globalcore.LocalFriendService`；Repository 仅保留查询、锁行和 CRUD，审批事务由 Service 统一管理。
 25. DONE：GameServer 启动链路已删除 `repo.Migrate`，LoginServer 与 GameServer 均不执行 DDL；开发与隔离测试按需显式准备表，完整建表 SQL 留到首次上线前统一整理和审核。
+26. DONE：GameServer 配置加载与 LoginServer 统一为严格 YAML 和启动前校验；删除运行时默认值，补齐 staging/prod 显式鉴权配置，未知字段、关键字段缺失或参数关系无效时直接拒绝启动。
 
 ## 8. 卡牌 MVP 后续任务拆分
 

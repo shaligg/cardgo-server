@@ -1513,7 +1513,7 @@ go_game_server/
 
 配置文件为 `configs/gameserver.{local,staging,prod}.yaml` 与 `configs/loginserver.{local,staging,prod}.yaml`。两个进程分别读取进程级 `GAME_CONFIG`，默认使用各自的 local 文件。旧配置文件名和 `api_host/api_port` 不提供兼容入口。
 
-两端必须使用相同的 ticket issuer、算法、密钥，以及同一 Redis 实例、DB、节点和玩家归属 key 前缀。密钥只从环境变量读取。LoginServer 严格校验 HTTP 地址、issuer、TTL 和 Redis 关键配置，缺失或显式无效时启动失败。
+两端必须使用相同的 ticket issuer、算法、密钥，以及同一 Redis 实例、DB、节点和玩家归属 key 前缀。密钥只从环境变量读取。LoginServer 与 GameServer 均严格解析 YAML 并校验运行所需配置；未知字段、关键字段缺失或参数关系无效时启动失败，禁止由进程静默补默认值或自动修正错误配置。
 
 GameServer 本地配置（管理 HTTP 8082，WS 8081）：
 

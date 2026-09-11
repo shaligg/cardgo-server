@@ -55,9 +55,6 @@ func Bootstrap(ctx context.Context) (*Application, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg.Auth.Algorithm != "hmac-sha256" {
-		return nil, fmt.Errorf("unsupported auth algorithm: %s", cfg.Auth.Algorithm)
-	}
 	ticketSecret := os.Getenv(cfg.Auth.SecretEnvKey)
 	if ticketSecret == "" {
 		return nil, fmt.Errorf("auth ticket secret env %s is empty", cfg.Auth.SecretEnvKey)
