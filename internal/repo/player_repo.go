@@ -29,6 +29,11 @@ func (r *DBPlayerRepository) GetByUID(ctx context.Context, uid string) (Player, 
 	return toDomainPlayer(row), nil
 }
 
+// GetByUIDs 批量查询玩家基础资料，返回值按 UID 建立索引。
+func (r *DBPlayerRepository) GetByUIDs(ctx context.Context, uids []string) (map[string]Player, error) {
+	return playerProfiles(ctx, r.db, uids)
+}
+
 // CreateIfAbsent 幂等创建玩家，并返回数据库中的最终资料。
 //
 // 默认值由玩家领域传入，Repository 只负责持久化和并发建号去重。
@@ -68,15 +73,6 @@ func toDomainPlayer(row model.Player) Player {
 		Level:    row.Level,
 		Gold:     row.Gold,
 	}
-}
-
-// playerExists 查询社交关系目标玩家是否存在。
-func playerExists(ctx context.Context, db *gorm.DB, uid string) (bool, error) {
-	var count int64
-	if err := db.WithContext(ctx).Model(&model.Player{}).Where("uid = ?", uid).Count(&count).Error; err != nil {
-		return false, fmt.Errorf("check player exists: %w", err)
-	}
-	return count > 0, nil
 }
 
 // playerProfiles 批量读取社交列表展示需要的玩家基础资料。

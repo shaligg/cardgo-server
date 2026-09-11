@@ -12,7 +12,7 @@ import (
 
 func TestLocalFriendServiceLifecycle(t *testing.T) {
 	dbRepo := newSocialRepository(t, "friend_a", "friend_b")
-	service := LocalFriendService{Repo: dbRepo.DBFriendRepository, Tx: dbRepo.Tx}
+	service := LocalFriendService{Repo: dbRepo.DBFriendRepository, Players: dbRepo.DBPlayerRepository, Tx: dbRepo.Tx}
 	ctx := context.Background()
 
 	if err := service.Apply(ctx, "friend_a", "friend_b", "friend-apply"); err != nil {
@@ -50,7 +50,7 @@ func TestLocalFriendServiceLifecycle(t *testing.T) {
 
 func TestLocalFriendServiceRejectsInvalidRelation(t *testing.T) {
 	dbRepo := newSocialRepository(t, "friend_owner")
-	service := LocalFriendService{Repo: dbRepo.DBFriendRepository, Tx: dbRepo.Tx}
+	service := LocalFriendService{Repo: dbRepo.DBFriendRepository, Players: dbRepo.DBPlayerRepository, Tx: dbRepo.Tx}
 	ctx := context.Background()
 
 	if err := service.Apply(ctx, "friend_owner", "friend_owner", "friend-self"); !errors.Is(err, ErrCannotFriendSelf) {

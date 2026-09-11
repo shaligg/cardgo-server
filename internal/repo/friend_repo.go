@@ -27,11 +27,6 @@ func (r *DBFriendRepository) WithTx(tx *gorm.DB) *DBFriendRepository {
 	return &DBFriendRepository{db: tx}
 }
 
-// PlayerExists 查询目标玩家是否存在。
-func (r *DBFriendRepository) PlayerExists(ctx context.Context, uid string) (bool, error) {
-	return playerExists(ctx, r.db, uid)
-}
-
 // CreateFriendRelationData 尝试写入好友关系，并返回本次是否成功创建。
 func (r *DBFriendRepository) CreateFriendRelationData(ctx context.Context, uid string, targetUID string, requesterUID string, status string, reqID string) (bool, error) {
 	uidLow, uidHigh := orderedUIDPair(uid, targetUID)
@@ -93,35 +88,15 @@ func (r *DBFriendRepository) ListFriendRelations(ctx context.Context, uid string
 		nextCursor = rows[len(rows)-1].ID
 	}
 
-	otherUIDs := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if row.UIDLow == uid {
-			otherUIDs = append(otherUIDs, row.UIDHigh)
-		} else {
-			otherUIDs = append(otherUIDs, row.UIDLow)
-		}
-	}
-	profiles, err := playerProfiles(ctx, r.db, otherUIDs)
-	if err != nil {
-		return nil, 0, err
-	}
-
 	result := make([]FriendRecord, 0, len(rows))
 	for _, row := range rows {
 		otherUID := row.UIDLow
 		if otherUID == uid {
 			otherUID = row.UIDHigh
 		}
-		profile, ok := profiles[otherUID]
-		if !ok {
-			return nil, 0, fmt.Errorf("%w: %s", ErrSocialPlayerNotFound, otherUID)
-		}
 		result = append(result, FriendRecord{
 			OtherUID:     otherUID,
 			RequesterUID: row.RequesterUID,
-			Level:        profile.Level,
-			Nickname:     profile.Nickname,
-			AvatarID:     profile.AvatarID,
 			Status:       row.Status,
 		})
 	}

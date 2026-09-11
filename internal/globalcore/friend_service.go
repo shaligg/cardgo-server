@@ -2,6 +2,7 @@ package globalcore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -23,8 +24,9 @@ type FriendItem struct {
 //
 // 它负责好友规则与事务编排，未来 GameServer 可把 FriendService 替换为 RemoteClient。
 type LocalFriendService struct {
-	Repo *repo.DBFriendRepository
-	Tx   idb.TxManager
+	Repo    *repo.DBFriendRepository
+	Players *repo.DBPlayerRepository
+	Tx      idb.TxManager
 }
 
 // Apply 创建一条好友申请。
@@ -43,12 +45,15 @@ func (s LocalFriendService) Apply(ctx context.Context, uid string, targetUID str
 	if s.Repo == nil {
 		return fmt.Errorf("friend repository is nil")
 	}
-	exists, err := s.Repo.PlayerExists(ctx, targetUID)
-	if err != nil {
-		return err
+	if s.Players == nil {
+		return fmt.Errorf("player repository is nil")
 	}
-	if !exists {
-		return ErrPlayerNotFound
+	_, err := s.Players.GetByUID(ctx, targetUID)
+	if err != nil {
+		if errors.Is(err, repo.ErrPlayerNotFound) {
+			return ErrPlayerNotFound
+		}
+		return err
 	}
 	created, err := s.Repo.CreateFriendRelationData(ctx, uid, targetUID, uid, FriendStatusPending, reqID)
 	if err != nil {
@@ -127,12 +132,27 @@ func (s LocalFriendService) List(ctx context.Context, uid string, cursor string,
 	if s.Repo == nil {
 		return nil, "", fmt.Errorf("friend repository is nil")
 	}
+	if s.Players == nil {
+		return nil, "", fmt.Errorf("player repository is nil")
+	}
 	rows, nextCursor, err := s.Repo.ListFriendRelations(ctx, uid, afterID, pageSize)
+	if err != nil {
+		return nil, "", err
+	}
+	otherUIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		otherUIDs = append(otherUIDs, row.OtherUID)
+	}
+	profiles, err := s.Players.GetByUIDs(ctx, otherUIDs)
 	if err != nil {
 		return nil, "", err
 	}
 	items := make([]FriendItem, 0, len(rows))
 	for _, row := range rows {
+		profile, ok := profiles[row.OtherUID]
+		if !ok {
+			return nil, "", fmt.Errorf("%w: %s", ErrPlayerNotFound, row.OtherUID)
+		}
 		status := row.Status
 		if row.Status == FriendStatusPending {
 			status = "incoming"
@@ -142,9 +162,9 @@ func (s LocalFriendService) List(ctx context.Context, uid string, cursor string,
 		}
 		items = append(items, FriendItem{
 			UID:      row.OtherUID,
-			Level:    row.Level,
-			Nickname: row.Nickname,
-			AvatarID: row.AvatarID,
+			Level:    profile.Level,
+			Nickname: profile.Nickname,
+			AvatarID: profile.AvatarID,
 			Status:   status,
 		})
 	}

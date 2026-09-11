@@ -73,9 +73,6 @@ const (
 type FriendRecord struct {
 	OtherUID     string
 	RequesterUID string
-	Level        int
-	Nickname     string
-	AvatarID     int64
 	Status       string
 }
 
