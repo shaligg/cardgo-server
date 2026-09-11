@@ -70,7 +70,7 @@ func isInsufficientResourceError(err error) bool {
 
 func isAlreadyMaxError(err error) bool {
 	return errors.Is(err, cardsvc.ErrCardMaxLevel) ||
-		errors.Is(err, repo.ErrFacilityMaxLevel)
+		errors.Is(err, workshopsvc.ErrFacilityMaxLevel)
 }
 
 func isPreconditionFailedError(err error) bool {

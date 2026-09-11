@@ -8,6 +8,7 @@ import (
 	terrors "github.com/bigfish/go_orm_1/internal/framework/transport/errors"
 	battlesvc "github.com/bigfish/go_orm_1/internal/gameplay/battle"
 	cardsvc "github.com/bigfish/go_orm_1/internal/gameplay/card"
+	workshopsvc "github.com/bigfish/go_orm_1/internal/gameplay/workshop"
 	"github.com/bigfish/go_orm_1/internal/repo"
 )
 
@@ -37,7 +38,7 @@ func TestToBizErrorMapsExpectedClientCodes(t *testing.T) {
 }
 
 func TestToBizErrorSupportsWrappedErrors(t *testing.T) {
-	got := toBizError(errors.Join(errors.New("upgrade failed"), repo.ErrFacilityMaxLevel))
+	got := toBizError(errors.Join(errors.New("upgrade failed"), workshopsvc.ErrFacilityMaxLevel))
 	if got.Code != terrors.CodeAlreadyMax {
 		t.Fatalf("code = %s, want %s", got.Code, terrors.CodeAlreadyMax)
 	}

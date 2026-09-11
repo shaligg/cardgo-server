@@ -43,9 +43,6 @@ var ErrCardNotOwned = errors.New("card not owned")
 // ErrDeckNotFound 表示目标卡组不存在。
 var ErrDeckNotFound = errors.New("deck not found")
 
-// ErrFacilityMaxLevel 表示设施已经达到当前版本等级上限。
-var ErrFacilityMaxLevel = errors.New("facility already max level")
-
 // ErrPlayerFacilityNotFound 表示玩家还没有目标设施数据。
 var ErrPlayerFacilityNotFound = errors.New("player facility not found")
 

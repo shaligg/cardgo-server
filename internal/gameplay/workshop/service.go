@@ -27,6 +27,8 @@ const (
 var (
 	// ErrFacilityNotFound 表示请求中的设施 ID 不在 MVP 设施列表中。
 	ErrFacilityNotFound = errors.New("facility not found")
+	// ErrFacilityMaxLevel 表示设施已经达到策划配置的等级上限。
+	ErrFacilityMaxLevel = errors.New("facility already max level")
 )
 
 // Service 是工坊模块应用服务。
@@ -153,7 +155,7 @@ func (s Service) UpgradeFacility(ctx context.Context, uid string, facilityID str
 			}
 		}
 		if current.Level >= facilityConfig.MaxLevel {
-			return repo.ErrFacilityMaxLevel
+			return ErrFacilityMaxLevel
 		}
 
 		costs = s.upgradeCosts(facilityConfig, current.Level)
