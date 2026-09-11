@@ -82,10 +82,7 @@ func (r *DBWorkshopRepository) CreateFacilityInTx(ctx context.Context, tx *gorm.
 	if tx == nil {
 		return fmt.Errorf("transaction is nil")
 	}
-	row, err := playerFacilityModel(facility)
-	if err != nil {
-		return err
-	}
+	row := playerFacilityModel(facility)
 	if err := tx.WithContext(ctx).Create(&row).Error; err != nil {
 		return fmt.Errorf("create player facility: %w", err)
 	}
@@ -97,10 +94,7 @@ func (r *DBWorkshopRepository) UpdateFacilityInTx(ctx context.Context, tx *gorm.
 	if tx == nil {
 		return fmt.Errorf("transaction is nil")
 	}
-	row, err := playerFacilityModel(facility)
-	if err != nil {
-		return err
-	}
+	row := playerFacilityModel(facility)
 	result := tx.WithContext(ctx).
 		Model(&model.PlayerFacility{}).
 		Where("uid = ? AND facility_id = ?", facility.UID, facility.FacilityID).
@@ -118,10 +112,7 @@ func (r *DBWorkshopRepository) UpdateFacilityInTx(ctx context.Context, tx *gorm.
 	return nil
 }
 
-func playerFacilityModel(facility PlayerFacility) (model.PlayerFacility, error) {
-	if facility.UID == "" || facility.FacilityID == "" || facility.Level <= 0 {
-		return model.PlayerFacility{}, fmt.Errorf("invalid player facility uid=%s facility_id=%s level=%d", facility.UID, facility.FacilityID, facility.Level)
-	}
+func playerFacilityModel(facility PlayerFacility) model.PlayerFacility {
 	row := model.PlayerFacility{
 		UID:        facility.UID,
 		FacilityID: facility.FacilityID,
@@ -132,7 +123,7 @@ func playerFacilityModel(facility PlayerFacility) (model.PlayerFacility, error) 
 		unlockedAt := time.Unix(facility.UnlockedAt, 0)
 		row.UnlockedAt = &unlockedAt
 	}
-	return row, nil
+	return row
 }
 
 // UpdateLastOfflineRewardAtInTx 保存业务层已经决定推进的离线收益领取时间。

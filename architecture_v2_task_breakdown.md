@@ -392,6 +392,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 23. DONE：消除公会仓储对聊天表的跨领域访问；公会解散由 `LocalGuildService` 在同一事务内协调公会与聊天 Repository，分别清理公会聚合和频道历史。
 24. DONE：消除好友仓储对玩家资料表的跨领域访问；`LocalFriendService` 通过玩家 Repository 校验目标并批量补齐资料，`DBFriendRepository` 只返回和持久化好友关系数据。
 25. DONE：消除公会仓储对玩家资料表的跨领域访问；玩家行锁和申请人资料统一由 `LocalGuildService` 调用玩家 Repository，公会 Repository 只访问公会、成员和申请数据。
+26. DONE：删除工坊 Repository 对设施 UID、配置 ID 和等级的重复业务校验；`WorkshopService` 负责生成合法设施状态，Repository 只做模型转换与持久化。
 
 目标：
 
