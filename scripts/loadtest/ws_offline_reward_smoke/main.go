@@ -1,16 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"time"
 
 	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/repo/model"
+	"github.com/bigfish/go_orm_1/internal/testutil/accountclient"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -74,32 +73,13 @@ func main() {
 }
 
 func login(account string) (loginResp, error) {
-	loginURL := os.Getenv("LOGIN_URL")
-	if loginURL == "" {
-		loginURL = "http://127.0.0.1:8080/api/login"
-	}
-
-	body := map[string]interface{}{
-		"account":    account,
-		"password":   "demo",
-		"client_ip":  "127.0.0.1",
-		"client_ver": "1.0.0",
-	}
-	raw, _ := json.Marshal(body)
-	resp, err := http.Post(loginURL, "application/json", bytes.NewReader(raw))
+	raw, err := accountclient.LoginAndEnter("", account)
+	var result loginResp
 	if err != nil {
-		return loginResp{}, fmt.Errorf("login request failed: %w (hint: start server with `go run ./cmd/gameserver`, or set LOGIN_URL)", err)
+		return result, err
 	}
-	defer resp.Body.Close()
-
-	var lr loginResp
-	if err := json.NewDecoder(resp.Body).Decode(&lr); err != nil {
-		return loginResp{}, err
-	}
-	if lr.Code != 0 {
-		return loginResp{}, errors.New("login failed: " + lr.Msg)
-	}
-	return lr, nil
+	err = json.Unmarshal(raw, &result)
+	return result, err
 }
 
 func auth(conn *websocket.Conn, ticket string) map[string]interface{} {

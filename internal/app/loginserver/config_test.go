@@ -15,7 +15,7 @@ func TestLoadProcessConfigs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cfg.HTTP.Port != 8080 || cfg.Auth.Issuer != "login-module" || cfg.Auth.TicketTTLSec != 60 || cfg.Auth.SecretEnvKey != "GAME_TICKET_SECRET" {
+			if cfg.Account.SessionIdleTTLSec != 2592000 || cfg.HTTP.Port != 8080 || cfg.Auth.Issuer != "login-module" || cfg.Auth.TicketTTLSec != 60 || cfg.Auth.SecretEnvKey != "GAME_TICKET_SECRET" {
 				t.Fatalf("unexpected login config: %+v", cfg)
 			}
 			if cfg.Redis.NodeKeyPrefix != "game:gameserver" || cfg.Redis.PlayerOwnerKeyPrefix != "game:player_owner" {
@@ -31,6 +31,14 @@ func TestLoadConfigRejectsInvalidConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tt := range []struct{ name, old, replacement string }{
+		{"idle ttl", "session_idle_ttl_sec: 2592000", "session_idle_ttl_sec: 0"},
+		{"idle ttl overflow", "session_idle_ttl_sec: 2592000", "session_idle_ttl_sec: 31536001"},
+		{"old ttl rejected", "session_idle_ttl_sec: 2592000", "session_ttl_sec: 2592000"},
+		{"db env", `dsn_env_key: "ACCOUNT_DB_DSN"`, `dsn_env_key: ""`},
+		{"db pool", "max_open_conns: 20", "max_open_conns: 0"},
+		{"rate", "requests_per_minute: 120", "requests_per_minute: 0"},
+		{"body", "max_body_bytes: 4096", "max_body_bytes: 0"},
+		{"proxy", "trusted_proxies: []", "trusted_proxies: [bad-cidr]"},
 		{"host", `host: "0.0.0.0"`, `host: ""`},
 		{"port", "port: 8080", "port: 0"},
 		{"issuer", `issuer: "login-module"`, `issuer: ""`},

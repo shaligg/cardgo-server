@@ -48,7 +48,7 @@
 ## 2. 架构结论
 1. 形态：模块化单体（非微服务），一个 `GameServer` 进程承载实时链路。
 2. 职责划分：
-- 独立 LoginServer：Demo 账号接入、分配节点、发放 ticket；当前直接把 account 作为 UID，不校验正式账号密码。
+- 独立 LoginServer：自建账号登录态、节点分配与入场票；首期契约见 6.0/19.1，已实现，验收记录见账号域任务。
 - 游戏服：验票接入、会话管理、卡牌/订单/工坊等实时业务、状态持久化。
 3. 设计边界：
 - 登录入口独立为 LoginServer；realtime/state/repo 等仍在各 GameServer 内组装。
@@ -65,7 +65,7 @@
 - `AccessGateway` 不进入 MVP 主链路，只作为未来统一入口、隐藏源站或安全防护的演进方案。
 
 ## 3. 边界定义
-1. 登录、账号、选服由独立单实例 LoginServer 中的 `login` 模块负责；GameServer 不创建 LoginService 或 TicketIssuer。
+1. 账号认证由独立单实例 LoginServer 中的 `account` 模块负责，分配与签票由 `login` 负责；GameServer 不创建 LoginService 或 TicketIssuer。
 2. `login` 与 `realtime` 通过接口边界交互，不直接共享内部实现细节。
 3. GM 后台为独立系统，不进入实时主链路。
 4. 当前阶段不引入策划分服逻辑；只保留性能扩容能力。
@@ -197,12 +197,11 @@ Client -> AccessGateway ==少量内网复用连接==> GameServer
 3. 主读写链路保持 `Service -> Repository -> DB`；热点优化由对应业务模块按实测结果增加专用内存结构。
 
 ## 5. 核心模块职责
-### 5.1 login（独立 LoginServer）
-- Demo 账号接入：直接使用 account 作为 UID，正式账号认证后置
-- 从 Redis 节点注册表读取全部存活 GameServer，并按重连偏好和负载策略分配节点
-- 签发 `enter_ticket`
-- 对外暴露 `POST /api/login` 和基础 `/healthz`；不依赖 MySQL、WS 或玩法模块
-- 不注册游戏节点，不写玩家归属；分配器只读取最近归属，GameServer 验票并绑定成功后才认领
+### 5.1 account 与 login（独立 LoginServer）
+- 首期自建账号：`platform/account` 负责注册、密码验证、稳定 UID、账号状态、会话签发/闲置续期/退出。外部平台和绑定后续接入，当前不暴露对应接口。
+- `platform/login` 只接收账号域验证后的 UID，读取 Redis 节点/最近归属，复用分配器和签票器。
+- LoginServer 独立持有账号 MySQL 与 Redis 连接，HTTP 协议见 19.1；不创建游戏玩家或写玩家归属。
+- GameServer 仅验入场票，成功后按原流程初始化玩家、绑定会话和认领归属；不访问账号表。
 
 ### 5.1.1 HTTP 边界
 - GameServer 不通过 HTTP 承载玩家玩法请求。
@@ -622,51 +621,25 @@ GameServer Handler
 
 ## 6. 关键协议
 ### 6.0 账号登录态与 GameServer 入场票
-正式架构分两层凭证：
 
-```text
-account_token / refresh_token
-  - 证明“玩家是谁”
-  - 由 LoginService/账号系统签发和校验
-  - 有效期较长，支持 App 重启、杀端恢复、断线后免密
+首期采用自建账号。账号名去除首尾空格并转为小写，允许 3~64 个 ASCII 字母、数字、下划线和连字符；密码原样处理，长度 12~72 字节，bcrypt cost=10。注册显式创建账号，登录不自动注册；不存在、密码错误和非 active 账号统一认证失败。内部 UID 使用服务端 UUID v4，与账号名无关。外部平台和绑定留待后续，身份表只启用 `local`；不实现空验证器或兼容 Demo。
 
-enter_ticket
-  - 证明“玩家本次被允许进入哪台 GameServer”
-  - 由 LoginService 在选服后签发
-  - TTL 很短，一次性消费，包含 uid/server_id/exp/nonce
-```
+每个账号只接受一个当前登录会话。换设备需重新验证账号密码；每次密码登录成功都会切换当前会话，使原 session_token 失效，包括在同设备重新提交密码登录。正常启动和断线重连使用已有 session_token。客户端凭证应保存在本机安全存储，不随账号云同步或设备备份迁移；当前 Bearer 协议不识别硬件身份，复制有效令牌不能被当作换设备识别。两种凭证分工：
 
-职责边界：
+- `session_token`：不透明随机令牌，格式 `s.<内部 UID UUID>.<32 随机字节的无填充 base64url>`。客户端持久保存，accounts 只存当前完整令牌的 SHA-256 哈希和到期时间；UID 仅用于查找账号，必须校验完整令牌哈希，不能信任令牌中的 UID；每次进入都查询 MySQL 账号状态。默认闲置 30 天（2592000 秒）过期，无从首次登录起算的绝对期限。
+- `enter_ticket`：沿用 6.2 的签名、目标服和一次性消费，默认 60 秒；不透明账号 Token 不能用于 GameServer 鉴权。账号 Token 无签名密钥，不复用票据密钥。
 
-1. `account_token` 不直接交给 GameServer 做完整账号鉴权。
-2. GameServer 只校验 `enter_ticket`，不关心账号密码、平台 SDK、refresh token。
-3. 断线重连不是重新输入密码，而是客户端用已有账号登录态向 LoginService 换取新的 `enter_ticket`。
-4. 玩家显式退出登录时，客户端删除账号登录态，服务端可使 refresh token 失效；下次才需要重新账号登录。
-5. MVP 阶段可以用 `/api/login` 同时完成账号简化校验、选服和发 `enter_ticket`；正式版本建议拆成 `/api/login`、`/api/enter`、`/api/reconnect`。
+启动或断线重连均调用 `/api/enter`。账号认证在一个 MySQL 事务中锁定账号行，验证当前令牌哈希、到期时间和 active 状态，取得锁后读取当前时间；到达 `expires_at` 即过期，不能自行续期。验证成功将到期时间顺延至当前时间加 30 天（不缩短已有期限）；写入失败整体回滚，不签票。后续分配节点失败仍算一次成功的账号认证。游戏 WS 心跳和业务消息不访问账号库，不续期账号会话。
 
-推荐正式流程：
+续期不更换 `session_token`，并发进入和响应丢失后重试均可复用同一令牌。进入成功同时返回新的 `session_expire_at`（Unix 秒）；客户端本地期限仅作提示，以服务端验证为准，不能因网络故障或本地旧期限直接清除令牌。杀端、关闭游戏和设备重启只要本地令牌仍在且未失效，就直接进入；清除数据、主动退出或收到认证失效响应后重新验证身份。
 
-```text
-首次账号登录:
-Client -> LoginService: account/password 或 platform_token
-Client <- LoginService: account_token + refresh_token
+退出通过 Bearer `session_token` 校验当前哈希后，清空 accounts 的 token_hash 与 expires_at；旧令牌退出不会清除新令牌，客户端删除本地令牌。重复退出、未知令牌返回成功，伪造令牌不能撤销他人会话。会话撤销成功后的请求，以及 banned/deleted 账号，不能续期或取得新票；错误、已过期或已撤销令牌不会延长期限。账号状态在 MySQL 维护，不在公开 HTTP 暴露封禁接口。新登录只切换账号会话；新设备连接 GameServer 后按现有规则顶掉旧连接。已签入场票在原 TTL 内仍可使用，存量 WS 不因账号会话变更即时关闭。
 
-进入游戏服:
-Client -> LoginService: account_token
-LoginService -> NodeAllocator: choose GameServer
-Client <- LoginService: server_id + ws_addr + enter_ticket
-Client -> GameServer gateway/ws: auth_req(enter_ticket)
-
-断线重连/杀端恢复:
-Client -> LoginService: account_token 或 refresh_token
-LoginService -> NodeAllocator: choose GameServer
-Client <- LoginService: server_id + ws_addr + new enter_ticket
-Client -> GameServer gateway/ws: auth_req(new enter_ticket)
-```
+账号表只维护当前认证状态，不保存登录历史；过期后直接拒绝认证，下次密码登录覆盖当前凭证，无历史会话积累或清理任务。登录历史应通过日志或独立审计表记录，不参与认证；本期不增加历史记录功能。外部平台后续仅接入身份验证入口，验证通过后复用内部 UID 和本节会话规则。
 
 ### 6.1 登录接入协议
-1. 客户端先调用登录 API，登录模块内部调用 `NodeAllocator` 分配目标 GameServer。
-2. 登录 API 返回：`GameServer ws_addr + server_id + enter_ticket`。
+1. 客户端先通过账号登录取得登录态，再调用进入 API；账号校验成功后调用 `NodeAllocator` 分配目标 GameServer。
+2. 进入 API 返回：`uid + session_expire_at + GameServer ws_addr + server_id + enter_ticket + expire_at`。
 3. 客户端使用返回的 `ws_addr` 直连目标 GameServer 的 `gateway/ws`。
 4. 客户端连接游戏服后首帧必须 `auth(ticket)`。
 5. GameServer 校验 `ticket.server_id` 必须等于自身 `server_id`。
@@ -709,20 +682,13 @@ MVP 固定使用 HMAC-SHA256：
 
 ## 7. 核心流程
 ### 7.1 登录接入流程
-1. 客户端调用登录模块 API
-2. 登录模块分配节点并签发 ticket
-3. 登录模块返回目标 GameServer 的 `server_id`、`ws_addr` 和 `enter_ticket`
-4. 客户端直连目标 GameServer 的 `gateway/ws` 并发送 auth
-5. 游戏服验票通过后显式初始化或读取玩家基础资料
-6. 玩家准备成功后建立 session、认领 Redis 玩家归属并返回 `auth_ok + resync`
+1. 客户端显式注册（已有账号跳过），使用密码登录，获得账号登录态。
+2. 客户端调用进入 API，账号域查询会话/账号状态后将可信 UID 交给 login。
+3. login 使用现有 Redis `NodeRegistry` 与 `PlayerOwnerStore` 分配目标服并签发票据，不写玩家归属。
+4. 客户端直连目标 WS、提交入场票；GameServer 验票后初始化玩家，再绑定会话和归属。
+5. 断线后重用进入 API；复用 session_token；会话闲置过期或撤销后重新验证身份。
 
-说明：
-
-- `NodeAllocator` 是登录服内部的节点分配模块，不是独立进程。
-- `NodeAllocator` 每次从 Redis `NodeRegistry` 读取 TTL 尚未过期的节点，不从本地静态列表选择。
-- 等负载或心跳数据短暂一致时，使用基于 UID 的稳定“两选一”策略分散突发登录；GameServer 的连接硬上限负责最终准入兜底。
-- 登录服只参与登录和重连分配，不转发后续游戏消息。
-- GameServer 不参与选服，只验证 ticket 中的 `server_id` 是否等于自己。
+无可用节点、Redis 故障只影响进入；MySQL 可用且凭证正确时账号登录仍成功。分配继续使用原服优先、负载选择和 GameServer 硬上限兜底，不引入静态节点旁路。
 
 ### 7.2 读流程
 1. `Service -> Repository.GetX`
@@ -1215,6 +1181,19 @@ MVP 至少需要以下业务表：
 4. 玩家登录触发领取时，只读取 `rank_reward` 或 `mail_attachment`，不重新执行排行榜结算。
 5. 未来多 `globalserver` 实例时，用 DB 乐观锁或 Redis 短锁抢占任务，但最终正确性依赖 DB 唯一键。
 
+### 9.12 账号域数据（LoginServer）
+
+账号表可与游戏表位于同一 MySQL 实例，连接与权限独立配置。账号 Repository 只读写账号表，GameServer 只访问原有游戏表，不在两进程之间建立事务或外键。
+
+| 表 | 字段与约束 |
+|---|---|
+| `accounts` | `uid varchar(64)` 主键；`status varchar(16)` 非空，active/banned/deleted；`token_hash char(64)` 非空，未登录/退出为空字符串；`expires_at` 可空，未登录/退出为 NULL；created_at、updated_at |
+| `account_identities` | `provider varchar(32)` 与 `subject varchar(64)` 联合主键；首期 local + 规范化账号名；`uid varchar(64)` 非空索引；`password_hash varchar(128)` 非空；created_at。后续外部身份接入时再调整凭证字段，不复用平台 subject 作为 UID |
+
+账号和身份映射在同一事务创建，唯一键冲突回滚账号行；Repository 转换重复键错误。密码登录、免密认证续期、退出都锁定同一账号行，在现有 TransactionRunner 中更新 token_hash 和 expires_at。密码登录只覆盖当前凭证，失败回滚后原凭证仍可用；并发登录以最后提交为准。续期必须匹配当前哈希，旧令牌不能恢复已覆盖或已清空的状态。账号表与身份表只承担认证职责，不增加会话历史关联。
+
+业务启动只连接并探测所需账号表，不执行 DDL。`repo.MigrateAccount` 仅供显式开发/测试入口使用，不加入 GameServer 的 `repo.Migrate`。真实测试使用独立数据库；首次上线前按项目约定整理正式建表 SQL。
+
 ## 10. 2000 在线容量设计
 1. 硬限制：`max_connections = 2000`
 2. 认证前后都检查连接上限
@@ -1342,7 +1321,9 @@ go_game_server/
 │   │   ├── loginserver/
 │   │   │   ├── bootstrap.go
 │   │   │   ├── lifecycle.go
-│   │   │   └── config.go
+│   │   │   ├── config.go
+│   │   │   ├── http.go
+│   │   │   └── http_security.go
 │   │   └── gameserver/
 │   │       ├── bootstrap.go
 │   │       ├── lifecycle.go
@@ -1378,7 +1359,11 @@ go_game_server/
 │   │   └── transport/
 │   │       ├── dto/
 │   │       └── errors/
-│   ├── platform/                   # 游戏平台能力；login 由 LoginServer 组装，其余由 GameServer 组装
+│   ├── platform/                   # account/login 由 LoginServer 组装，其余由 GameServer 组装
+│   │   ├── account/                 # 自建身份、UID 和设备会话
+│   │   │   ├── password.go
+│   │   │   ├── service.go
+│   │   │   └── session.go
 │   │   ├── login/
 │   │   │   ├── handler.go
 │   │   │   ├── allocator.go
@@ -1410,6 +1395,7 @@ go_game_server/
 │   │   └── contracts.go            # MVP 先落地公共服接口/DTO，不预创建空实现目录
 │   ├── repo/
 │   │   ├── model/
+│   │   │   ├── account.go
 │   │   │   ├── player.go
 │   │   │   ├── inventory.go
 │   │   │   ├── card.go
@@ -1417,6 +1403,7 @@ go_game_server/
 │   │   │   ├── workshop.go
 │   │   │   ├── social.go
 │   │   │   └── asset_log.go
+│   │   ├── account_repo.go
 │   │   ├── repository.go
 │   │   ├── migration.go
 │   │   ├── player_repo.go
@@ -1477,9 +1464,9 @@ go_game_server/
 |---|---|---|---|
 | 框架层 | `internal/framework` | 标准库、少量基础第三方库、必要的平台抽象接口 | `internal/domain`、`internal/gameplay`、`internal/globalcore`、具体业务 Service |
 | 协议契约层 | `internal/contract` | 标准库 | 具体 Handler、Service、Repo |
-| 平台层 | `internal/platform` | `internal/framework`、`internal/infra` | 具体玩法规则 |
+| 平台层 | `internal/platform` | `internal/framework`、`internal/infra`；account 可依赖账号 Repository | 具体玩法规则 |
 | 应用组装层 | `internal/app/gameserver` | `framework/platform/contract/domain/gameplay/globalcore/globalserver/repo/infra` | 不写核心业务规则 |
-| 登录组装层 | `internal/app/loginserver` | `platform/login`、Redis、日志、标准库 | GameServer、玩法、Repository、MySQL、WS Server |
+| 登录组装层 | `internal/app/loginserver` | `platform/account`、`platform/login`、账号 Repository、MySQL、Redis、日志、标准库 | GameServer、玩法、WS Server |
 | 业务层 | `internal/domain`、`internal/gameplay`、`internal/globalcore`、`internal/globalserver` | `contract`、`repo`、`gamedata`、必要的 `platform` 接口 | `framework/gateway/ws` 这类网络接入实现 |
 | 数据与基础设施 | `internal/repo`、`internal/gamedata`、`internal/infra` | 标准库、数据库/Redis 驱动 | 具体 WS Handler、Gateway |
 | 项目内通用工具 | `internal/pkg` | 标准库、同层更底层 `internal/pkg/*` | `app`、`domain`、`gameplay`、`repo`、`infra`、`platform`、`framework` |
@@ -1582,30 +1569,30 @@ gamedata:
   facility_config_path: "configs/gamedata/facilities.json"
 ```
 
-LoginServer 本地配置（登录 HTTP 8080）：
+LoginServer 配置保留原 HTTP、auth（仅入场票）和 Redis 字段，增加：
 
 ```yaml
-http:
-  host: "0.0.0.0"
-  port: 8080
-
-auth:
-  issuer: "login-module"
-  algorithm: "hmac-sha256"
-  ticket_ttl_sec: 60
-  secret_env_key: "GAME_TICKET_SECRET"
-
-redis:
-  addr: "127.0.0.1:6379"
-  password_env_key: "GAME_REDIS_PASSWORD"
-  db: 0
-  node_key_prefix: "game:gameserver"
-  player_owner_key_prefix: "game:player_owner"
+account:
+  session_idle_ttl_sec: 2592000
+http_security:
+  trusted_proxies: []
+  requests_per_minute: 120
+  max_body_bytes: 4096
+db:
+  dsn_env_key: "ACCOUNT_DB_DSN"
+  max_open_conns: 20
+  max_idle_conns: 10
+  conn_max_lifetime_sec: 1800
+  conn_max_idle_time_sec: 300
 ```
 
-staging/prod 的 Redis 地址、对外 WS 地址、管理鉴权和 Origin 按部署环境配置。新增 GameServer 使用唯一的 node_id、WS/Admin 端口和 advertised_ws_addr，LoginServer 无需重启。LoginServer 没有 MySQL、游戏节点身份、节点心跳或玩法配置；签发 TTL 只属于 LoginServer。
+local/staging/prod 均严格校验；数据库 DSN 必须设置，超时参数追加到驱动配置用于连接/读写超时。未知字段、无效时长、非法代理 CIDR、无效连接池配置拒绝启动。Access TTL 不大于会话 TTL。
 
-GameServer 的 nonce 防重放记录直接使用票据 `exp` 的剩余有效期，不设置第二套 nonce TTL；修改 LoginServer 的 `ticket_ttl_sec` 会同时决定票据和对应 nonce 记录的最长生命周期。
+公开账号与进入 API 共用按来源 IP 的每分钟固定窗口计数，超限返回 429；单实例内存限流表有容量上限，满载时拒绝新来源，窗口到期清理。客户端正文不接受 `client_ip`；默认使用 RemoteAddr，只有直连对端属于 trusted_proxies 时从右向左剥离可信代理后取 X-Forwarded-For 中的来源。无效代理链拒绝请求。请求体限制适用于全部 API；HTTP 设置读写超时、请求处理超时，响应带 Cache-Control: no-store。
+
+正式入口必须由受信任反向代理提供 HTTPS，客户端 WS 使用 WSS；不将外网直接接入配置为受信任代理。访问日志不记录请求正文、Authorization 或完整 Token。账号数据库使用参数化 SQL 日志，不输出凭证值；公开错误不透传内部错误。
+
+staging/prod 的 Redis、对外 WS 地址、管理鉴权和 Origin 按环境配置。新增 GameServer 使用唯一 node_id、端口与对外地址，LoginServer 无需重启。GameServer 的 nonce TTL 沿用票据 exp，不另设 TTL。
 
 ### 17.1 玩法配置边界
 MVP 阶段至少需要以下配置：
@@ -1638,13 +1625,6 @@ import (
     "time"
 )
 
-type LoginRequest struct {
-	Account   string
-	Password  string
-	ClientIP  string
-	ClientVer string
-}
-
 type LoginResult struct {
 	UID         string
 	ServerID    string
@@ -1654,7 +1634,7 @@ type LoginResult struct {
 }
 
 type Provider interface {
-	LoginAndIssueTicket(ctx context.Context, req LoginRequest) (LoginResult, error)
+	Enter(ctx context.Context, uid string, clientIP string) (LoginResult, error)
 }
 
 type NodeAllocator interface {
@@ -1701,7 +1681,7 @@ type TicketIssuer interface {
 4. `node_id` 和 `advertised_ws_addr` 必须在节点间唯一且可被客户端访问；监听地址 `ws_host/ws_port` 与对外地址不能混为一项配置。
 5. `PlayerOwnerStore` 使用共享 Redis：Login 只调用 `GetLastServerID` 做原节点优先；GameServer 负责 `Claim/MarkOffline/RefreshOwned` 和批量归属核对。
 6. 分配策略不能在等负载时固定选择同一个 server_id，必须避免节点心跳间隔内的突发登录惊群。
-7. `LoginService` 只负责认证、分配和发票，不转发游戏消息。
+7. `login.Service.Enter` 只负责已验证 UID 的分配与发票。`account.Service` 提供 Register、Login、Refresh、Logout、Authenticate，依赖账号 Repository 和 TransactionRunner，不转发游戏消息。
 
 ### 18.2 Auth
 ```go
@@ -2032,44 +2012,40 @@ type GlobalJobResult struct {
 5. 未来独立部署时，transport 层只做协议转换，不改变接口语义。
 
 ## 19. 协议定义（Login API + WebSocket）
-### 19.1 Login API（独立 LoginServer）
-`POST /api/login`
+### 19.1 Account / Enter API（独立 LoginServer）
 
-说明：
-- 该 API 由 `cmd/loginserver` 独立提供，与 GameServer 同仓库、不同进程。
-- 多个 GameServer 共享登录入口；GameServer 管理端口的 `/api/login` 返回 404。
-- Demo 阶段该 API 可以直接用 `account` 简化账号校验，并一次性完成选服和发 `enter_ticket`。
-- 正式版本建议把账号登录态和 GameServer 入场票拆开：
-- `POST /api/login`：账号登录，返回 `account_token/refresh_token`。
-- `POST /api/enter`：使用 `account_token` 换取 `server_id/ws_addr/enter_ticket`。
-- `POST /api/reconnect`：使用 `account_token` 或 `refresh_token` 重新换取 `server_id/ws_addr/enter_ticket`。
-- GameServer 始终只接收 `enter_ticket`，不直接处理账号密码、平台 SDK token 或 refresh token。
-- 本次进程拆分保持 `enter_ticket` 响应字段、签名和首帧 `auth_req` 语义不变。
+所有接口仅支持 POST，JSON 请求严格拒绝未知字段与多份 JSON；错误响应 `{code:"错误码",msg:"公开说明"}`，成功 `{code:0,msg:"ok",data:...}`。session_token 只放在 Authorization，不放 URL 或请求体。GameServer 不暴露这些 API。
 
-请求示例：
-```json
-{
-  "account": "test_user",
-  "password": "******",
-  "client_ip": "10.1.1.8",
-  "client_ver": "1.0.0"
-}
+| API | 请求 | 成功 data |
+|---|---|---|
+| `/api/register` | `{account,password}` | `{uid}`，不自动登录或创建游戏玩家 |
+| `/api/login` | `{account,password}` | `{uid,session_token,session_expire_at}` |
+| `/api/logout` | `{}` + `Authorization: Bearer <session_token>` | `{}`；幂等撤销当前设备 |
+| `/api/enter` | `{}` + `Authorization: Bearer <session_token>` | `{uid,session_expire_at,server_id,ws_addr,enter_ticket,expire_at}`，expire_at 为入场票期限 |
+
+本地调用示例（演示凭证只用于本地测试，不把真实 Token 写入 shell 历史）：
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/register -H 'Content-Type: application/json' -d '{"account":"demo_user","password":"local-example-password"}'
+curl -X POST http://127.0.0.1:8080/api/login -H 'Content-Type: application/json' -d '{"account":"demo_user","password":"local-example-password"}'
+# 客户端保存响应中的登录态；以下环境变量由客户端或当前 shell 临时持有。
+curl -X POST http://127.0.0.1:8080/api/enter -H 'Content-Type: application/json' -H "Authorization: Bearer ${SESSION_TOKEN}" -d '{}'
 ```
 
-响应示例：
-```json
-{
-  "code": 0,
-  "msg": "ok",
-  "data": {
-    "uid": "u10001",
-    "server_id": "node-a",
-    "ws_addr": "wss://10.0.0.1:8081/ws",
-    "enter_ticket": "<token>",
-    "expire_at": 1710000060
-  }
-}
-```
+`/api/refresh`、`/api/reconnect`、平台登录和身份绑定本期不存在（404）。重连调用 enter；密码登录不选服、不查 Redis 节点。
+
+| HTTP / code | 场景与客户端动作 |
+|---|---|
+| 400 BAD_REQUEST | 非法 JSON、字段或账号/密码格式；修正请求 |
+| 401 AUTH_INVALID | 账号不存在、密码错误、非 active 登录、令牌非法、撤销或已被新登录替换；清除本地旧令牌并重新登录 |
+| 401 AUTH_EXPIRED | 会话连续 30 天没有成功通过 LoginServer 认证，已过期；重新验证身份 |
+| 409 ACCOUNT_UNAVAILABLE | 注册名不可用；另选账号名，不披露其他账号信息 |
+| 413 REQUEST_TOO_LARGE | 请求体超限 |
+| 429 RATE_LIMITED | 来源限流或限流表满；按 Retry-After 退避 |
+| 503 NO_AVAILABLE_NODE | 进入时无可用节点；保留账号登录态，稍后重试进入 |
+| 503 SERVICE_UNAVAILABLE | 账号数据库、Redis 或依赖异常；不签票、不返回内部错误，保留 session_token，稍后重试 |
+
+登录失败响应不区分账号存在与否，缺失身份也执行一次等成本密码比较。所有账号 API 的敏感输入不记录日志。
 
 ### 19.2 WebSocket 通用包结构
 ```json
@@ -2145,7 +2121,7 @@ MVP 只使用协议 Envelope 中的业务心跳，不再额外维护一套 WebSo
 4. 重连成功后，只对未确认请求按原发送顺序重试一次，并复用原请求标识。
 5. 同一请求在重连后再次超时，不再触发循环重连，直接结束请求并提示服务暂时不可用。
 
-明确收到 Socket 错误或关闭、设备网络切换、App 回到前台后确认旧连接不可用时，不等待业务请求的 `10s`，直接进入全局重连流程。
+客户端收到服务端 `kick` 时，停止自动重连，提示被顶号或踢下线，等待玩家主动操作。顶号后旧 session_token 在新密码登录已提交时失效；再次进入收到 `AUTH_INVALID` 后清除旧令牌，重新验证密码。普通 Socket 错误或关闭、设备网络切换、App 回到前台后确认旧连接不可用时，不等待业务请求的 `10s`，进入全局重连流程；连接关闭不能覆盖已经收到的 kick 状态。
 
 #### 重连退避
 
@@ -2382,85 +2358,26 @@ router.RegisterCached(protocol.OpLevelSettle, levelHandler.Settle)
 
 ```mermaid
 sequenceDiagram
-    autonumber
     participant C as Client
-    box LoginServer 独立进程
-        participant LAPI as LoginHTTPHandler
-        participant LS as LoginService
-        participant NA as RegistryNodeAllocator
-        participant TI as TicketIssuer
-    end
-    participant R as Redis 节点表与玩家归属
-    box GameServer 目标进程
-        participant GW as GatewayWS
-        participant AV as AuthVerifier
-        participant NS as NonceStore(Memory)
-        participant PP as PreparePlayer
-        participant SM as SessionManager
-    end
-    participant DB as MySQL
-
-    C->>LAPI: POST /api/login(account,password,client_ip,client_ver)
-    LAPI->>LS: LoginAndIssueTicket(req)
-    LS->>NA: Allocate(uid, client_ip)
-    NA->>R: ListNodes / GetLastServerID
-    R-->>NA: 存活节点与最近归属
-    NA-->>LS: server_id, GameServer ws_addr
-    LS->>TI: Issue(uid, server_id)
-    TI-->>LS: enter_ticket, expire_at
-    LS-->>LAPI: LoginResult
-    LAPI-->>C: 200 code=0, data(uid,server_id,ws_addr,enter_ticket,expire_at)
-
-    C->>GW: WS Handshake GET /ws
-    GW->>GW: 检查 drain / 连接硬上限
-    alt 拒绝准入
-        GW-->>C: HTTP 503 SERVER_FULL
-    else 准入成功
-        GW-->>C: HTTP 101
-        C->>GW: 首帧 auth_req(ticket)
-        GW->>AV: Verify(ticket, expected_server_id, now)
-        AV->>AV: 验签、issuer、exp、server_id
-        AV->>NS: ConsumeNonceOnce(nonce)
-        NS-->>AV: ok
-        AV-->>GW: claims
-        GW->>PP: 初始化或读取玩家、准备 resync
-        PP->>DB: EnsureCreated / 读取基础数据
-        DB-->>PP: 玩家数据
-        PP-->>GW: resync
-        GW->>SM: BindWithinLimit
-        SM-->>GW: accepted / old_connection
-        GW->>R: Claim(uid, server_id, conn_id)
-        R-->>GW: previous_owner
-        Note over GW,R: 归属成功后处理顶号、记录指标；任一步失败不返回成功 ack
-        GW-->>C: auth_ack(ok:true, uid, session_id, resync)
-    end
+    participant A as LoginServer Account
+    participant DB as Account MySQL
+    participant L as Login / Allocator
+    participant R as Redis
+    participant G as GameServer
+    C->>A: POST /api/login(account,password)
+    A->>DB: 验证身份、状态并创建会话
+    A-->>C: session_token + session_expire_at
+    C->>A: POST /api/enter + Bearer session_token
+    A->>DB: 校验会话哈希、期限、撤销与账号状态
+    A->>L: Enter(verified UID, trusted IP)
+    L->>R: 读取节点与最近归属
+    L-->>C: server_id + ws_addr + enter_ticket + expire_at
+    C->>G: WS + auth_req(enter_ticket)
+    G->>G: 原有验签、nonce、玩家初始化、会话与归属认领
+    G-->>C: auth_ack + resync
 ```
 
-### 20.1.1 模块经过顺序（实现对照）
-
-1. 登录发票：`Client -> LoginServer HTTPHandler -> login.Service -> Redis NodeAllocator -> TicketIssuer -> Client`。
-2. 建连：客户端直连登录返回的 GameServer `ws_addr`，不经过 LoginServer。
-3. 首帧鉴权：`gateway/ws -> auth.Verifier -> nonce store -> PreparePlayer -> SessionManager -> Redis Owner.Claim -> auth_ack`。
-4. LoginServer 不写玩家归属；停止 LoginServer 不影响已有 GameServer WS 连接。
-
-### 20.1.2 连接创建关键校验点与失败返回
-
-| 阶段 | 校验点 | 失败返回 |
-|---|---|---|
-| Login API | 方法、JSON、account 必填 | HTTP 4xx + code=1 |
-| 节点分配 | Redis 可用、节点健康/非 drain/未满载 | HTTP 500 + code=1，无 ticket |
-| WS 握手 | drain、max_connections | HTTP 503 + SERVER_FULL |
-| 首帧协议 | auth_req 与 ticket 必填 | WS error(AUTH_INVALID/BAD_REQUEST) |
-| Ticket | 签名、issuer、exp、server_id | AUTH_INVALID/AUTH_EXPIRED |
-| nonce | 目标节点内只消费一次 | AUTH_REPLAY |
-| 玩家准备、会话与归属 | 初始化、会话容量、Redis Claim | INTERNAL_ERROR / server_full，不返回成功 ack |
-
-### 20.1.3 返回报文约束（连接创建）
-
-1. 登录成功返回 `uid`、`ws_addr`、`server_id`、`enter_ticket`、`expire_at`。
-2. 鉴权成功返回 `auth_ack.payload = {ok:true, uid, session_id, resync?}`。
-3. WS 超限返回 `server_full.payload = {code, retry_after_sec, candidates}`，保持现有协议；客户端重新请求 LoginServer 获取新票据。
-4. claims 篡改、错误密钥、重放和错服票据必须失败；错服请求不能消费正确节点的 nonce。
+入场票错误密钥、字段篡改、重放和错服继续按原协议拒绝；错服不能消费正确目标的 nonce。GameServer WS 硬上限与失败响应保持不变。停止 LoginServer 不影响已有 GameServer WS 连接。
 
 ### 20.2 读流程（当前直接读 DB）
 ```mermaid
@@ -2596,7 +2513,7 @@ sequenceDiagram
     OG->>R: shorten owner TTL if server_id+conn_id match
     Note over OG,RT: owner TTL 有效期间不主动删除局内状态和近期请求结果
 
-    C->>L: POST /api/login(reconnect)
+    C->>L: POST /api/enter(Bearer session_token，闲置过期需重新认证)
     L->>R: read last server_id
     L->>L: choose server by health/load/last_server_id
 

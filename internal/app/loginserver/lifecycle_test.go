@@ -18,25 +18,27 @@ func TestStartReleasesRedisWhenPortOccupied(t *testing.T) {
 	}
 	defer listener.Close()
 	client := &recordingCloser{}
-	app := &Application{httpServer: &http.Server{Addr: listener.Addr().String()}, redisClient: client}
+	database := &recordingCloser{}
+	app := &Application{httpServer: &http.Server{Addr: listener.Addr().String()}, redisClient: client, dbClient: database}
 	if err := app.Start(context.Background()); err == nil {
 		t.Fatal("occupied port should fail")
 	}
-	if client.calls != 1 {
+	if client.calls != 1 || database.calls != 1 {
 		t.Fatalf("redis close calls = %d", client.calls)
 	}
 	if err := app.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if client.calls != 1 {
+	if client.calls != 1 || database.calls != 1 {
 		t.Fatal("Stop closed Redis twice")
 	}
 }
 
 func TestStopClosesHTTPAndRedis(t *testing.T) {
 	client := &recordingCloser{}
+	database := &recordingCloser{}
 	server := &http.Server{Addr: "127.0.0.1:0"}
-	app := &Application{httpServer: server, redisClient: client}
+	app := &Application{httpServer: server, redisClient: client, dbClient: database}
 	if err := app.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +54,7 @@ func TestStopClosesHTTPAndRedis(t *testing.T) {
 	if err := server.Serve(listener); err != http.ErrServerClosed {
 		t.Fatalf("Serve after Stop = %v", err)
 	}
-	if client.calls != 1 {
+	if client.calls != 1 || database.calls != 1 {
 		t.Fatalf("redis close calls = %d", client.calls)
 	}
 }

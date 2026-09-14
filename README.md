@@ -8,7 +8,7 @@ Cardgo Server is a game server demo that implements a complete client-to-databas
 
 ### Core Features
 
-- **Independent LoginServer** — HTTP login, Redis node allocation and signed entry tickets; clients connect directly to the assigned GameServer
+- **Independent LoginServer** — Password accounts, revocable sessions, Redis node allocation and signed entry tickets; clients connect directly to the assigned GameServer
 - **WebSocket Gateway** — connection upgrade, HMAC ticket authentication, nonce-based replay protection, heartbeat, rate limiting, graceful shutdown
 - **Shard Dispatcher** — per-player serial execution via 64-way sharded locks; ensures data consistency without blocking different players
 - **6 Business Modules** — Player, Asset, Inventory under `domain`; Card, Battle, Workshop under `gameplay`
@@ -23,7 +23,7 @@ Cardgo Server is a game server demo that implements a complete client-to-databas
 cmd/loginserver/         # Login HTTP entry point
 cmd/gameserver/          # GameServer entry point
 internal/
-  app/loginserver/       # Login config, Redis wiring and HTTP lifecycle
+  app/loginserver/       # Account DB, Redis wiring and HTTP lifecycle
   app/gameserver/        # Bootstrap, lifecycle, config
   framework/
     gateway/ws/          # WebSocket server, client, codec, limiter
@@ -35,6 +35,7 @@ internal/
   handler/               # Router, dispatcher, protocol handlers
   repo/                  # Data access layer (GORM + MySQL)
   platform/
+    account/             # Registration, credentials and account sessions
     auth/                # Ticket verifier, nonce store
     session/             # Session manager, command cache
     login/               # Ticket issuer, node allocator
@@ -77,16 +78,17 @@ export GAME_TICKET_SECRET='local-dev-ticket-secret'
 GAME_CONFIG=configs/gameserver.local.yaml ./bin/gameserver
 ```
 
-Start LoginServer in terminal 2 with the same ticket secret:
+Start LoginServer in terminal 2 with the same ticket secret and a separately configured account database connection (prepare account tables first):
 
 ```bash
 export GAME_TICKET_SECRET='local-dev-ticket-secret'
+export ACCOUNT_DB_DSN='account:password@tcp(127.0.0.1:3306)/game_accounts?charset=utf8mb4&parseTime=True&loc=UTC'
 GAME_CONFIG=configs/loginserver.local.yaml ./bin/loginserver
 ```
 
 Alternatively, replace the binary commands with `go run ./cmd/gameserver` and `go run ./cmd/loginserver` in their respective terminals.
 
-LoginServer listens on `:8080` (`POST /api/login`, `/healthz`). GameServer listens on `:8081/ws` and exposes management, health and metrics on `:8082`. GameServer does not expose `/api/login`. LoginServer needs Redis and the ticket secret, but no MySQL connection. Stop either process with Ctrl-C; stopping LoginServer leaves existing GameServer connections alive.
+LoginServer listens on `:8080` for account/entry APIs and `/healthz`. GameServer listens on `:8081/ws` and exposes management, health and metrics on `:8082`. GameServer does not expose `/api/login`. LoginServer requires its account MySQL connection, Redis and the ticket secret. Neither process performs DDL at startup. Stop either process with Ctrl-C; stopping LoginServer leaves existing GameServer connections alive.
 
 ### Run Tests
 
@@ -102,15 +104,16 @@ LOGIN_SPLIT_TEST_DB_DSN='game_test:password@tcp(127.0.0.1:3306)/game_test?charse
 
 ## Configuration
 
-Edit `configs/gameserver.{local,staging,prod}.yaml` and `configs/loginserver.{local,staging,prod}.yaml`. Each process accepts `GAME_CONFIG`, defaulting to its own local file. Both must use the same ticket issuer, algorithm, secret and Redis instance/DB/key prefixes. Database credentials are read only by GameServer from the environment variable named by `db.dsn_env_key`.
+Edit `configs/gameserver.{local,staging,prod}.yaml` and `configs/loginserver.{local,staging,prod}.yaml`. Each process accepts `GAME_CONFIG`, defaulting to its own local file. Both must use the same ticket issuer, algorithm, secret and Redis instance/DB/key prefixes. Each process reads its own `db.dsn_env_key`: `GAME_DB_DSN` for game data and `ACCOUNT_DB_DSN` for account data.
 
-For another GameServer, use a unique `server.node_id`, WS/Admin ports and `server.advertised_ws_addr`. LoginServer discovers it through Redis without restarting. See [the runbook](docs/ops/runbook.md) for startup, drain, monitoring and acceptance commands. The demo still treats `account` as UID; formal account authentication is not implemented.
+For another GameServer, use a unique `server.node_id`, WS/Admin ports and `server.advertised_ws_addr`. LoginServer discovers it through Redis without restarting. See [the runbook](docs/ops/runbook.md) for startup, drain, monitoring and acceptance commands. Self-hosted password accounts are implemented. External platforms and identity binding are deferred. Protocols, 30-day idle session expiry and revocation rules are defined only in [technical architecture §19.1](backend_technical_architecture.md#191-account--enter-api独立-loginserver).
 
 ## Architecture
 
 ```
 Login (independent LoginServer):
-  Client -> HTTP :8080 -> Redis NodeAllocator -> TicketIssuer
+  Client -> Account HTTP :8080 -> Account MySQL (register/login/enter/logout)
+  Client -> Enter HTTP :8080 -> Account validation -> Redis NodeAllocator -> TicketIssuer
   Client <- ws_addr + server_id + enter_ticket
 
 GameServer (client connects directly to the assigned node):
@@ -140,7 +143,7 @@ See the [architecture overview](architecture_v2.md), [technical architecture](ba
 | WebSocket | gorilla/websocket |
 | ORM | GORM + MySQL |
 | Shared State | Redis (go-redis/v9) |
-| Auth | HMAC-SHA256 ticket + nonce |
+| Auth | bcrypt passwords, revocable opaque sessions, HMAC-SHA256 ticket + nonce |
 | Logging | Structured logger (leveled) |
 | UUID | google/uuid |
 

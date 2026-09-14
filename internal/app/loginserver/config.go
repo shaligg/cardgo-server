@@ -4,6 +4,7 @@ package loginserver
 import (
 	"bytes"
 	"fmt"
+	"net/netip"
 	"os"
 	"strings"
 
@@ -12,8 +13,20 @@ import (
 
 const defaultConfigPath = "configs/loginserver.local.yaml"
 
-// Config 仅保存登录 HTTP、票据签发和共享 Redis 的配置。
+// Config 保存账号数据库、登录 HTTP、账号会话和票据签发配置。
 type Config struct {
+	HTTPSecurity HTTPSecurityConfig `yaml:"http_security"`
+	Account      struct {
+		SessionIdleTTLSec int64 `yaml:"session_idle_ttl_sec"`
+	} `yaml:"account"`
+	DB struct {
+		DSNEnvKey          string `yaml:"dsn_env_key"`
+		MaxOpenConns       int    `yaml:"max_open_conns"`
+		MaxIdleConns       int    `yaml:"max_idle_conns"`
+		ConnMaxLifetimeSec int    `yaml:"conn_max_lifetime_sec"`
+		ConnMaxIdleTimeSec int    `yaml:"conn_max_idle_time_sec"`
+	} `yaml:"db"`
+
 	HTTP struct {
 		Host string `yaml:"host"`
 		Port int    `yaml:"port"`
@@ -59,6 +72,21 @@ func LoadConfigFromEnv() (Config, error) {
 }
 
 func (cfg Config) validate() error {
+	if cfg.Account.SessionIdleTTLSec <= 0 || cfg.Account.SessionIdleTTLSec > 31536000 {
+		return fmt.Errorf("invalid account idle ttl (must be within one year)")
+	}
+	if strings.TrimSpace(cfg.DB.DSNEnvKey) == "" || cfg.DB.MaxOpenConns <= 0 || cfg.DB.MaxIdleConns < 0 || cfg.DB.MaxIdleConns > cfg.DB.MaxOpenConns || cfg.DB.ConnMaxLifetimeSec <= 0 || cfg.DB.ConnMaxLifetimeSec > 86400 || cfg.DB.ConnMaxIdleTimeSec <= 0 || cfg.DB.ConnMaxIdleTimeSec > cfg.DB.ConnMaxLifetimeSec {
+		return fmt.Errorf("invalid account database configuration")
+	}
+	if cfg.HTTPSecurity.RequestsPerMinute <= 0 || cfg.HTTPSecurity.RequestsPerMinute > 1000000 || cfg.HTTPSecurity.MaxBodyBytes < 128 || cfg.HTTPSecurity.MaxBodyBytes > 1048576 {
+		return fmt.Errorf("invalid http security configuration")
+	}
+	for _, cidr := range cfg.HTTPSecurity.TrustedProxies {
+		if _, err := netip.ParsePrefix(cidr); err != nil {
+			return fmt.Errorf("invalid trusted proxy CIDR")
+		}
+	}
+
 	if strings.TrimSpace(cfg.HTTP.Host) == "" || cfg.HTTP.Port < 1 || cfg.HTTP.Port > 65535 {
 		return fmt.Errorf("invalid loginserver http host or port")
 	}

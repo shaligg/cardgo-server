@@ -2,7 +2,7 @@
 
 ## 1. Start Services
 
-先确认 MySQL 开发库和当前所需表已准备、Redis 可用。开发阶段新增表或字段时直接在开发库执行 DDL；GameServer 启动只连接数据库，不创建或调整表。完整建表 SQL 在首次上线前统一整理。两个进程从仓库根目录启动：
+先确认 MySQL 开发库和当前所需表已准备、Redis 可用。开发阶段新增表或字段时直接在开发库执行 DDL；GameServer 与 LoginServer 启动只连接数据库，不创建或调整表；LoginServer 还会只读检查账号表已准备。账号表及显式开发/测试建表入口见技术架构第 9.12 节。完整建表 SQL 在首次上线前统一整理。两个进程从仓库根目录启动：
 
 终端 1：启动 GameServer，注册 node-a。
 
@@ -13,16 +13,17 @@ export GAME_TICKET_SECRET='local-dev-ticket-secret'
 GAME_CONFIG=configs/gameserver.local.yaml go run ./cmd/gameserver
 ```
 
-终端 2：用同一密钥启动 LoginServer，无需 GAME_DB_DSN。
+终端 2：用同一票据密钥及独立 ACCOUNT_DB_DSN 启动 LoginServer。
 
 ```bash
 export GAME_TICKET_SECRET='local-dev-ticket-secret'
+export ACCOUNT_DB_DSN='account:password@tcp(127.0.0.1:3306)/game_accounts?charset=utf8mb4&parseTime=True&loc=UTC'
 GAME_CONFIG=configs/loginserver.local.yaml go run ./cmd/loginserver
 ```
 
 | 进程 | 端口与路由 |
 |---|---|
-| LoginServer | 8080：POST /api/login、GET /healthz |
+| LoginServer | 8080：账号/进入 API、GET /healthz |
 | GameServer A | 8081：/ws；8082：/healthz、/metricsz、/admin/* |
 | GameServer B（扩容/验收） | 8091：/ws；8092：管理 HTTP |
 
@@ -31,15 +32,15 @@ GAME_CONFIG=configs/loginserver.local.yaml go run ./cmd/loginserver
 - staging/prod 必须设置 GAME_ADMIN_TOKEN，管理路由和指标需要 Bearer Token；LoginServer 不读取管理 Token。
 - 本地 ws.allowed_origins: ["*"] 只用于开发；staging/prod Web 客户端应配置准确 Origin。
 - 正式环境须覆盖 Redis 地址和 advertised_ws_addr。新增 GameServer 使用独立配置、唯一 node_id、WS/Admin 端口和 advertised_ws_addr，共享业务数据库与 Redis。LoginServer 自动感知节点，无需重启。
-- Ctrl-C 或 SIGTERM 分别停止对应进程。LoginServer 先停 HTTP，再关闭 Redis；已进入 GameServer 的玩家仍可请求。GameServer 停止时注销节点并关闭 WS，维护时先执行第 6 节 drain。
-- LoginServer /healthz 只表示 HTTP 进程存活；无可用节点或 Redis 故障时登录返回 HTTP 500、code=1，不签发票据。
+- Ctrl-C 或 SIGTERM 分别停止对应进程。LoginServer 先停 HTTP，再关闭 MySQL、Redis；已进入 GameServer 的玩家仍可请求。GameServer 停止时注销节点并关闭 WS，维护时先执行第 6 节 drain。
+- LoginServer /healthz 只表示 HTTP 进程存活；无可用节点或 Redis 故障时进入返回受控 503，不签发票据；账号登录只依赖账号 MySQL。
 
 ## 2. Baseline Smoke
 
 - `curl http://127.0.0.1:8080/healthz`
 - `curl http://127.0.0.1:8082/healthz`
 - `curl http://127.0.0.1:8082/metricsz -H "Authorization: Bearer ${GAME_ADMIN_TOKEN}"`
-- `curl -X POST http://127.0.0.1:8080/api/login -H 'Content-Type: application/json' -d '{"account":"u1001","password":"x","client_ip":"127.0.0.1","client_ver":"1.0.0"}'`
+- 注册、登录及换票请求见[技术架构 19.1](../../backend_technical_architecture.md#191-account--enter-api独立-loginserver)；运行下列 smoke 会经正式 API 准备测试账号并取得入场票。
 - `go run ./scripts/loadtest/ws_auth_smoke.go`
 - `go run ./scripts/loadtest/ws_biz_smoke`
 - `go run ./scripts/loadtest/ws_reconnect_smoke`
@@ -55,11 +56,19 @@ LOGIN_SPLIT_TEST_DB_DSN='game_test:password@tcp(127.0.0.1:3306)/game_test?charse
   go test ./scripts/loadtest/loginserver_split -v -count=1
 ```
 
-单节点使用 `-run '^TestSingleNode$'`，双节点使用 `-run '^TestMultiNode$'`。未设置 LOGIN_SPLIT_TEST_DB_DSN 时默认跳过。测试会写所选数据库，自动创建和清理临时 Redis、服务进程及配置，不停止已有开发 Redis 或服务；测试库中的玩家数据保留。
+账号完整链路使用 `-run '^TestAccountFlow$'`；单节点使用 `-run '^TestSingleNode$'`，双节点使用 `-run '^TestMultiNode$'`。未设置 LOGIN_SPLIT_TEST_DB_DSN 时默认跳过。测试会写所选数据库，自动创建和清理临时 Redis、服务进程及配置，不停止已有开发 Redis 或服务；测试库中的账号和玩家数据保留，需由测试负责人清理。缺少环境变量而跳过不能算验收通过。
 
-覆盖登录到 auth_ack、主链路 smoke、管理路由、默认监控、错误密钥、五个 claims 字段篡改、重放、错服票据、双节点分配和原服优先、drain/满载避让、正常注销、异常退出 TTL、Redis 故障以及停 LoginServer 后在线 WS 可用。双节点测试用 1 秒心跳、3 秒 TTL 加速验收，本地正式示例仍为 5/15 秒；drain 和连接数断言等待 Redis 心跳更新。
+覆盖自建账号注册、登录、闲置续期、退出、封禁、失效 Session Token 拒绝及存量 WS 边界，以及登录到 auth_ack、主链路 smoke、管理路由、默认监控、错误密钥、五个 claims 字段篡改、重放、错服票据、双节点分配和原服优先、drain/满载避让、正常注销、异常退出 TTL、Redis 故障以及停 LoginServer 后在线 WS 可用。双节点测试用 1 秒心跳、3 秒 TTL 加速验收，本地正式示例仍为 5/15 秒；drain 和连接数断言等待 Redis 心跳更新。
 
 容量验收分别占用每节点 2000 个真实 WS 连接槽，确认第 2001 个连接返回 SERVER_FULL。这是短时准入测试，不替代下文正式时长的 2000 在线性能压测。
+
+### 2.2 账号接入与维护
+
+- API、字段、令牌期限、续期规则和错误码以[技术架构 6.0/19.1](../../backend_technical_architecture.md)为准；客户端在本机保存 session_token，进入时自动续期，连续闲置 30 天或被新密码登录替换后重新认证；网络故障保留令牌重试，收到 kick 则停止自动重连。
+- 正式入口使用 HTTPS/WSS；可信代理 CIDR 按真实部署填写，不信任客户端提供的来源 IP。账号 API 有请求体上限、来源限流和 no-store 响应。
+- `LOGIN_URL` 可为本地 smoke 指定登录地址；`ACCOUNT_TEST_PASSWORD` 可覆盖测试密码。仅在隔离开发/测试环境运行，测试名称映射为固定账号名，重复运行复用该账号；不得在日志中打印完整凭证。
+- 账号数据库连接应只具备账号表的数据权限；建表权限交给显式部署步骤。GameServer 无需账号表权限。
+- 账号表仅保留当前凭证，无历史会话清理任务；账号仅接受最近一次密码登录的会话，旧 Token 需重新认证；退出校验当前凭证后清空，封禁阻止新登录/续期/换票。已签票等待原 TTL 到期，在线 WS 的即时踢人不属于本任务。
 
 ## 3. P5 Load Test (k6)
 
@@ -67,6 +76,8 @@ LOGIN_SPLIT_TEST_DB_DSN='game_test:password@tcp(127.0.0.1:3306)/game_test?charse
 - k6 installed and available in PATH
 - Local API endpoint reachable: `http://127.0.0.1:8080`
 - WS endpoint reachable: `ws://127.0.0.1:8081/ws`
+
+账号 API 按真实来源 IP 限流，k6 不再伪造 client_ip。压测前在隔离 LoginServer 配置中按负载调整 requests_per_minute，并明确记录；不要修改生产限制来跑压测。PASSWORD 必须符合当前注册规则。脚本现在包含注册/登录/进入成本，不能直接与旧 Demo 登录耗时作等价比较。
 
 默认正式阶段以本表和 `scripts/loadtest/k6_2k_online.js` 为唯一口径：
 

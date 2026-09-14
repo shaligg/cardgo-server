@@ -90,7 +90,7 @@ DB
 
 进程边界：
 
-- LoginServer 只处理登录分配、签票和自身存活检查；读取 Redis 节点与最近归属，不注册为游戏节点，不创建玩家，也不连接 MySQL。
+- LoginServer 处理账号注册、登录态、进入分配和自身存活检查；独立连接账号 MySQL，读取 Redis 节点与最近归属，不注册为游戏节点或创建游戏玩家。
 - GameServer 负责验票、玩家初始化、会话和归属认领、玩法及持久化；管理 HTTP 不承载登录 API。
 - 两个进程分别持有配置和资源，共享票据签验契约及 Redis 节点/归属数据，不通过 LoginServer 转发游戏消息。
 - GameServer 增减节点通过 Redis 注册表被发现，无需重启 LoginServer。停止 LoginServer 会阻断新登录和重连换票，但不主动断开已有 GameServer 连接。
@@ -136,7 +136,7 @@ MVP 概述模块：
 
 | 模块 | MVP 职责概述 |
 |---|---|
-| 登录入口（LoginServer） | Demo 账号接入、节点分配、票据签发 |
+| 登录入口（LoginServer） | 自建账号、登录态、节点分配和票据签发 |
 | 实时接入（GameServer） | 票据校验、玩家准备、会话建立和归属认领 |
 | 玩家资料 | 建号、基础资料、等级、章节进度 |
 | 资产 | 金币、钻石、体力、声望、材料、碎片、统一发奖扣费 |
@@ -234,7 +234,7 @@ globalserver/* 是公共服编排层，MVP 就可以有代码，但不独立启�
 
 ## 7. 核心分层
 
-以下为 GameServer 业务链路；LoginServer 的登录分配和签票不进入玩法、Repository 或 DB 层。
+以下为 GameServer 业务链路；LoginServer 的账号链路访问专用 Repository 和 MySQL，分配/签票不进入玩法层。
 
 ```text
 Gateway / Transport
@@ -290,14 +290,9 @@ DB 持久化数据
 
 登录分配由独立 LoginServer 内的 `Login / NodeAllocator` 决定。
 
-当前 Demo 直接把客户端提交的 `account` 作为 UID，只提供选服与 `enter_ticket` 签发；未实现密码/平台凭证校验、正式账号域或 `account_token / refresh_token`。独立进程不等于正式账号系统已经完成。
+自建账号域已落地：先注册/登录取得账号登录态，再凭有效会话申请入场票。内部 UID 由服务端生成，退出、闲置续期和账号状态由 LoginServer 统一校验。外部平台及身份绑定后续接入。
 
-正式账号系统的凭证分层（后续建设）：
-
-- `account_token / refresh_token` 证明“玩家是谁”，由登录/账号系统处理。
-- `enter_ticket` 证明“玩家本次可以进入哪台 GameServer”，由登录服选服后短期签发。
-- GameServer 只验证 `enter_ticket`，不直接处理账号密码、平台 SDK token 或 refresh token。
-- 断线重连不是重新输入密码，而是用已有账号登录态重新换取新的 `enter_ticket`。
+GameServer 仅验证短期入场票；断线使用已有登录态重新进入，会话闲置 30 天过期后重新验证身份。最终协议、数据与配置见 `backend_technical_architecture.md`，执行和验收记录见 `docs/tasks/account_domain.md`。
 
 MVP 接入方案：
 
@@ -326,7 +321,7 @@ GameServer 接入顺序：
 
 重连规则：
 
-- 原 GameServer 存活、非 drain 且未满载时优先回原服，否则选择其他可用节点；无可用节点或 Redis 读取失败时登录失败，不回退到静态节点。
+- 原 GameServer 存活、非 drain 且未满载时优先回原服，否则选择其他可用节点；无可用节点或 Redis 读取失败时进入失败，不回退到静态节点。
 - Login 从 Redis 玩家归属读取最近节点，但不在签发 ticket 时改写归属。
 - GameServer 验票并绑定会话成功后，才原子更新 Redis `uid -> server_id + conn_id`。
 - 玩家长期数据始终从 DB 加载；如果 Redis 前一归属仍是本节点，可继续使用本机尚未清理的 `BattleSession` 和近期请求结果。

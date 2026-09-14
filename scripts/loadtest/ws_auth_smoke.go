@@ -1,13 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"time"
 
+	"github.com/bigfish/go_orm_1/internal/testutil/accountclient"
 	"github.com/gorilla/websocket"
 )
 
@@ -29,25 +28,13 @@ func main() {
 		loginURL = v
 	}
 
-	reqBody := map[string]interface{}{
-		"account":    "smoke_user",
-		"password":   "demo",
-		"client_ip":  "127.0.0.1",
-		"client_ver": "1.0.0",
-	}
-	raw, _ := json.Marshal(reqBody)
-	resp, err := http.Post(loginURL, "application/json", bytes.NewReader(raw))
+	raw, err := accountclient.LoginAndEnter(loginURL, "smoke_user")
 	if err != nil {
 		panic(err)
 	}
-	defer resp.Body.Close()
-
 	var lr loginResp
-	if err := json.NewDecoder(resp.Body).Decode(&lr); err != nil {
+	if err := json.Unmarshal(raw, &lr); err != nil {
 		panic(err)
-	}
-	if lr.Code != 0 || lr.Data.EnterTicket == "" || lr.Data.WSAddr == "" {
-		panic(fmt.Sprintf("login failed: code=%d msg=%s", lr.Code, lr.Msg))
 	}
 
 	conn, _, err := websocket.DefaultDialer.Dial(lr.Data.WSAddr, nil)

@@ -5,8 +5,7 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 
 const SCENARIO = (__ENV.SCENARIO || 'S2').toUpperCase();
 const API_BASE = __ENV.API_BASE || 'http://127.0.0.1:8080';
-const PASSWORD = __ENV.PASSWORD || 'demo';
-const CLIENT_VER = __ENV.CLIENT_VER || '1.0.0';
+const PASSWORD = __ENV.PASSWORD || 'local-smoke-password-v1';
 const HEARTBEAT_MS = Number(__ENV.HEARTBEAT_MS || 15000);
 const BIZ_INTERVAL_MS = Number(__ENV.BIZ_INTERVAL_MS || defaultBizInterval(SCENARIO));
 const BIZ_STOP_BEFORE_CLOSE_MS = Number(__ENV.BIZ_STOP_BEFORE_CLOSE_MS || 15000);
@@ -176,21 +175,18 @@ export default function () {
 }
 
 function login(account) {
-  const payload = {
-    account,
-    password: PASSWORD,
-    client_ip: `10.0.${Math.floor(__VU / 255)}.${(__VU % 255) + 1}`,
-    client_ver: CLIENT_VER,
-  };
-
-  const res = http.post(`${API_BASE}/api/login`, JSON.stringify(payload), {
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    tags: {
-      endpoint: 'login',
-      scenario: SCENARIO,
-    },
+  const payload = { account, password: PASSWORD };
+  const params = { headers: { 'Content-Type': 'application/json' }, tags: { endpoint: 'login', scenario: SCENARIO } };
+  const registered = http.post(`${API_BASE}/api/register`, JSON.stringify(payload), params);
+  if (registered.status !== 200 && registered.status !== 409) return { ok: false };
+  const authenticated = http.post(`${API_BASE}/api/login`, JSON.stringify(payload), params);
+  if (authenticated.status !== 200) return { ok: false };
+  let session;
+  try { session = JSON.parse(authenticated.body).data; } catch (e) { return { ok: false }; }
+  if (!session || !session.session_token) return { ok: false };
+  const res = http.post(`${API_BASE}/api/enter`, '{}', {
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.session_token}` },
+    tags: { endpoint: 'enter', scenario: SCENARIO },
   });
 
   const ok = check(res, {

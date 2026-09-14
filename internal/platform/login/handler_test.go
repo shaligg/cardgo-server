@@ -51,7 +51,7 @@ func (r *fakeLastServerRecorder) SaveLastServerID(ctx context.Context, uid strin
 	return r.err
 }
 
-func TestLoginAndIssueTicketRecordsLastServer(t *testing.T) {
+func TestEnterRecordsLastServer(t *testing.T) {
 	recorder := &fakeLastServerRecorder{}
 	svc := Service{
 		Allocator:  fakeAllocator{serverID: "gs-a", wsAddr: "ws://gs-a/ws"},
@@ -59,9 +59,9 @@ func TestLoginAndIssueTicketRecordsLastServer(t *testing.T) {
 		LastServer: recorder,
 	}
 
-	result, err := svc.LoginAndIssueTicket(context.Background(), LoginRequest{Account: "u1"})
+	result, err := svc.Enter(context.Background(), "u1", "127.0.0.1")
 	if err != nil {
-		t.Fatalf("LoginAndIssueTicket returned error: %v", err)
+		t.Fatalf("Enter returned error: %v", err)
 	}
 	if result.UID != "u1" || result.ServerID != "gs-a" || result.WSAddr != "ws://gs-a/ws" || result.EnterTicket != "ticket-a" {
 		t.Fatalf("unexpected login result: %+v", result)
@@ -71,43 +71,43 @@ func TestLoginAndIssueTicketRecordsLastServer(t *testing.T) {
 	}
 }
 
-func TestLoginAndIssueTicketIgnoresLastServerRecordError(t *testing.T) {
+func TestEnterIgnoresLastServerRecordError(t *testing.T) {
 	svc := Service{
 		Allocator:  fakeAllocator{serverID: "gs-a", wsAddr: "ws://gs-a/ws"},
 		Issuer:     fakeIssuer{token: "ticket-a", expAt: 123},
 		LastServer: &fakeLastServerRecorder{err: errors.New("record failed")},
 	}
 
-	result, err := svc.LoginAndIssueTicket(context.Background(), LoginRequest{Account: "u1"})
+	result, err := svc.Enter(context.Background(), "u1", "127.0.0.1")
 	if err != nil {
-		t.Fatalf("LoginAndIssueTicket should ignore recorder error, got %v", err)
+		t.Fatalf("Enter should ignore recorder error, got %v", err)
 	}
 	if result.ServerID != "gs-a" {
 		t.Fatalf("expected login result even when recorder fails, got %+v", result)
 	}
 }
 
-func TestLoginAndIssueTicketReturnsAllocatorError(t *testing.T) {
+func TestEnterReturnsAllocatorError(t *testing.T) {
 	wantErr := errors.New("allocator failed")
 	svc := Service{
 		Allocator: fakeAllocator{err: wantErr},
 		Issuer:    fakeIssuer{token: "ticket-a", expAt: 123},
 	}
 
-	_, err := svc.LoginAndIssueTicket(context.Background(), LoginRequest{Account: "u1"})
+	_, err := svc.Enter(context.Background(), "u1", "127.0.0.1")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected allocator error, got %v", err)
 	}
 }
 
-func TestLoginAndIssueTicketReturnsIssuerError(t *testing.T) {
+func TestEnterReturnsIssuerError(t *testing.T) {
 	wantErr := errors.New("issuer failed")
 	svc := Service{
 		Allocator: fakeAllocator{serverID: "gs-a", wsAddr: "ws://gs-a/ws"},
 		Issuer:    fakeIssuer{err: wantErr},
 	}
 
-	_, err := svc.LoginAndIssueTicket(context.Background(), LoginRequest{Account: "u1"})
+	_, err := svc.Enter(context.Background(), "u1", "127.0.0.1")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected issuer error, got %v", err)
 	}

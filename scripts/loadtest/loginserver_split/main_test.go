@@ -26,6 +26,8 @@ import (
 	"github.com/bigfish/go_orm_1/internal/platform/auth"
 	"github.com/bigfish/go_orm_1/internal/platform/login"
 	"github.com/bigfish/go_orm_1/internal/repo"
+	"github.com/bigfish/go_orm_1/internal/repo/model"
+	"github.com/bigfish/go_orm_1/internal/testutil/accountclient"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	goredis "github.com/redis/go-redis/v9"
@@ -54,6 +56,8 @@ type cluster struct {
 // newCluster 只创建测试自有进程；临时 Redis 不使用开发环境的 6379。
 func newCluster(t *testing.T) *cluster {
 	t.Helper()
+	t.Setenv("LOGIN_URL", "http://127.0.0.1:8080/api/login")
+	t.Setenv("ACCOUNT_TEST_PASSWORD", "local-smoke-password-v1")
 	dsn := os.Getenv("LOGIN_SPLIT_TEST_DB_DSN")
 	if dsn == "" {
 		t.Skip("未设置 LOGIN_SPLIT_TEST_DB_DSN，跳过真实进程验收")
@@ -72,7 +76,7 @@ func newCluster(t *testing.T) *cluster {
 		t.Fatal(err)
 	}
 	c := &cluster{t: t, root: root, dir: t.TempDir(), secret: uuid.NewString(), adminToken: uuid.NewString(), http: &http.Client{Timeout: 12 * time.Second}}
-	c.env = append(os.Environ(), "LC_ALL=C", "GAME_DB_DSN="+dsn, "GAME_TICKET_SECRET="+c.secret, "GAME_ADMIN_TOKEN="+c.adminToken)
+	c.env = append(os.Environ(), "LC_ALL=C", "GAME_DB_DSN="+dsn, "ACCOUNT_DB_DSN="+dsn, "GAME_TICKET_SECRET="+c.secret, "GAME_ADMIN_TOKEN="+c.adminToken)
 	for _, name := range []string{"gameserver", "loginserver"} {
 		c.run("go", "build", "-o", filepath.Join(c.dir, name), "./cmd/"+name)
 	}
@@ -98,6 +102,7 @@ func newCluster(t *testing.T) *cluster {
 	c.gameConfig.Redis.Addr = redisAddr
 	c.gameConfig.Redis.PasswordEnvKey = ""
 	c.gameConfig.Admin.RequireAuth = true
+	c.loginConfig.HTTPSecurity.RequestsPerMinute = 10000
 	c.loginConfig.Redis.Addr = redisAddr
 	c.loginConfig.Redis.PasswordEnvKey = ""
 	return c
@@ -109,6 +114,9 @@ func prepareGameSchema(t *testing.T, dsn string) {
 	gdb, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("连接 LoginServer 拆分测试库失败: %v", err)
+	}
+	if err := repo.MigrateAccount(gdb); err != nil {
+		t.Fatal(err)
 	}
 	if err := repo.Migrate(gdb); err != nil {
 		t.Fatalf("准备 LoginServer 拆分测试表失败: %v", err)
@@ -262,18 +270,32 @@ func (c *cluster) request(method, url, body string, admin bool) (int, []byte) {
 	return resp.StatusCode, data
 }
 
-func (c *cluster) login(uid string) login.LoginResult {
+func (c *cluster) login(name string) login.LoginResult {
 	c.t.Helper()
-	body, _ := json.Marshal(map[string]string{"account": uid})
-	status, data := c.request("POST", "http://127.0.0.1:8080/api/login", string(body), false)
+	raw, err := accountclient.LoginAndEnter("", name)
+	if err != nil {
+		c.t.Fatal(err)
+	}
 	var result struct {
 		Code int
 		Data login.LoginResult
 	}
-	if err := json.Unmarshal(data, &result); err != nil || status != 200 || result.Code != 0 || result.Data.EnterTicket == "" || result.Data.UID != uid || result.Data.ExpireAt <= time.Now().Unix() {
-		c.t.Fatalf("invalid login result: status=%d body=%s err=%v", status, data, err)
+	if err := json.Unmarshal(raw, &result); err != nil || result.Code != 0 || result.Data.UID == "" || result.Data.UID == name || result.Data.EnterTicket == "" {
+		c.t.Fatal("invalid enter result", err)
 	}
 	return result.Data
+}
+
+func (c *cluster) enterFailure(name, code string) {
+	c.t.Helper()
+	session, err := accountclient.NewSession("", name)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	status, body, err := accountclient.Post("", "/api/enter", struct{}{}, session.SessionToken)
+	if err != nil || status != 503 || !bytes.Contains(body, []byte(code)) || bytes.Contains(body, []byte("enter_ticket")) {
+		c.t.Fatalf("enter failure: status=%d err=%v", status, err)
+	}
 }
 
 type envelope struct {
@@ -316,13 +338,7 @@ func (c *cluster) exchange(conn *websocket.Conn, req interface{}) envelope {
 	return out
 }
 
-func (c *cluster) noAvailableNode() {
-	c.t.Helper()
-	status, body := c.request("POST", "http://127.0.0.1:8080/api/login", `{"account":"no-node"}`, false)
-	if status != 500 || !bytes.Contains(body, []byte("no available game server")) || bytes.Contains(body, []byte("enter_ticket")) {
-		c.t.Fatalf("unexpected no-node response: %d %s", status, body)
-	}
-}
+func (c *cluster) noAvailableNode() { c.enterFailure("no-node", "NO_AVAILABLE_NODE") }
 
 func TestSingleNode(t *testing.T) {
 	c := newCluster(t)
@@ -330,6 +346,7 @@ func TestSingleNode(t *testing.T) {
 	loginProcess := c.startLogin()
 	uid := "split-" + uuid.NewString()
 	result := c.login(uid)
+	uid = result.UID
 	if result.ServerID != "node-a" || result.WSAddr != "ws://127.0.0.1:8081/ws" {
 		t.Fatalf("unexpected allocation: %+v", result)
 	}
@@ -418,10 +435,8 @@ func TestSingleNode(t *testing.T) {
 	}
 	c.noAvailableNode()
 	c.stop(c.redisProcess, false)
-	status, body := c.request("POST", "http://127.0.0.1:8080/api/login", `{"account":"redis-down"}`, false)
-	if status != 500 || bytes.Contains(body, []byte("enter_ticket")) {
-		t.Fatalf("Redis failure fell back: %d %s", status, body)
-	}
+	c.enterFailure("redis-down", "SERVICE_UNAVAILABLE")
+
 	t.Log("graceful removal, no available nodes and Redis outage returned controlled errors")
 }
 
@@ -583,4 +598,115 @@ func (c *cluster) checkCapacity(cfg gameserver.Config, otherNode string) {
 		c.t.Fatal("full node was allocated")
 	}
 	c.t.Logf("%s: 2000 live WS slots, connection 2001 rejected, allocator selected %s", cfg.Server.NodeID, otherNode)
+}
+
+// TestAccountFlow 用真实进程验证稳定会话重连、闲置续期和撤销边界。
+func TestAccountFlow(t *testing.T) {
+	c := newCluster(t)
+	c.startGame(c.gameConfig)
+	loginProcess := c.startLogin()
+	name := "lifecycle-" + uuid.NewString()
+	p, err := accountclient.NewSession("", name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := gorm.Open(mysql.Open(os.Getenv("LOGIN_SPLIT_TEST_DB_DSN")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	post := func(path string, token string, want int) []byte {
+		t.Helper()
+		status, raw, err := accountclient.Post("", path, struct{}{}, token)
+		if err != nil || status != want {
+			t.Fatalf("%s status=%d want=%d err=%v", path, status, want, err)
+		}
+		return raw
+	}
+	enter := func() login.LoginResult {
+		t.Helper()
+		raw := post("/api/enter", p.SessionToken, 200)
+		var entry struct {
+			Data struct {
+				login.LoginResult
+				SessionExpireAt int64 `json:"session_expire_at"`
+			}
+		}
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			t.Fatal(err)
+		}
+		if entry.Data.UID != p.UID || entry.Data.SessionExpireAt < time.Now().Add(30*24*time.Hour-time.Minute).Unix() {
+			t.Fatal("entry did not renew session for 30 days")
+		}
+		var row model.Account
+		if err := db.Where("uid = ?", p.UID).Take(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+		if row.ExpiresAt == nil || row.ExpiresAt.Unix() != entry.Data.SessionExpireAt {
+			t.Fatal("renewal response differs from persisted deadline")
+		}
+		return entry.Data.LoginResult
+	}
+	// 将本设备剩余闲置时间缩短为一天；进入后应恢复 30 天。
+	if err := db.Model(&model.Account{}).Where("uid = ?", p.UID).Update("expires_at", time.Now().UTC().Add(24*time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
+	entry := enter()
+	conn := c.auth(entry.WSAddr, entry.EnterTicket, "")
+	_ = conn.Close()
+	// 模拟客户端杀端与 LoginServer 重启，复用本地原令牌恢复连接。
+	c.stop(loginProcess, false)
+	c.startLogin()
+	enter() // 丢弃响应，原 session_token 可重试；每次取得不同入场票。
+	entry = enter()
+	conn = c.auth(entry.WSAddr, entry.EnterTicket, "")
+	// 新设备验证密码后旧 Token 立即失效，连接游戏服后旧设备收到顶号通知。
+	old := p
+	p, err = accountclient.NewSession("", name)
+	if err != nil || p.UID != old.UID {
+		t.Fatal("device switch changed UID", err)
+	}
+	post("/api/enter", old.SessionToken, 401)
+	entry = enter()
+	current := c.auth(entry.WSAddr, entry.EnterTicket, "")
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var kicked envelope
+	if err := conn.ReadJSON(&kicked); err != nil || kicked.Type != "kick" {
+		t.Fatal("old device did not receive kick", err)
+	}
+	conn = current
+	post("/api/logout", old.SessionToken, 200)
+	enter() // 旧设备的迟到退出不能撤销新设备会话。
+	post("/api/logout", p.SessionToken, 200)
+	post("/api/logout", p.SessionToken, 200)
+	post("/api/enter", p.SessionToken, 401)
+	if got := c.exchange(conn, map[string]interface{}{"seq": 2, "type": "biz_req", "op_code": 1001, "payload": map[string]interface{}{}}); got.Type != "biz_ack" || !got.Payload.OK {
+		t.Fatal("logout affected existing WS")
+	}
+	// 过期会话不能自行恢复，重新验证密码后仍映射原内部 UID。
+	expiryName := "expired-" + uuid.NewString()
+	expired, err := accountclient.NewSession("", expiryName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.Account{}).Where("uid = ?", expired.UID).Update("expires_at", time.Now().UTC().Add(-time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if raw := post("/api/enter", expired.SessionToken, 401); !bytes.Contains(raw, []byte("AUTH_EXPIRED")) {
+		t.Fatal("expired session did not return AUTH_EXPIRED")
+	}
+	recovered, err := accountclient.NewSession("", expiryName)
+	if err != nil || recovered.UID != expired.UID {
+		t.Fatal("password recovery changed UID", err)
+	}
+	post("/api/enter", recovered.SessionToken, 200)
+	if err := db.Model(&model.Account{}).Where("uid = ?", recovered.UID).Update("status", "banned").Error; err != nil {
+		t.Fatal(err)
+	}
+	post("/api/enter", recovered.SessionToken, 401)
+	t.Log("real idle renewal, same-token retry/reconnect after restart, device replacement/kick, expiry recovery, logout, ban and existing-WS boundary passed")
 }

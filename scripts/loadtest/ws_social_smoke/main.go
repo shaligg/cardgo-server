@@ -1,15 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net/http"
-	"os"
 	"time"
 
 	"github.com/bigfish/go_orm_1/internal/contract/protocol"
+	"github.com/bigfish/go_orm_1/internal/testutil/accountclient"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -127,29 +124,13 @@ func connect(account string) *wsClient {
 }
 
 func login(account string) (loginResponse, error) {
-	loginURL := os.Getenv("LOGIN_URL")
-	if loginURL == "" {
-		loginURL = "http://127.0.0.1:8080/api/login"
-	}
-	raw, _ := json.Marshal(map[string]interface{}{
-		"account":    account,
-		"password":   "demo",
-		"client_ip":  "127.0.0.1",
-		"client_ver": "1.0.0",
-	})
-	response, err := http.Post(loginURL, "application/json", bytes.NewReader(raw))
-	if err != nil {
-		return loginResponse{}, fmt.Errorf("login request failed: %w", err)
-	}
-	defer response.Body.Close()
+	raw, err := accountclient.LoginAndEnter("", account)
 	var result loginResponse
-	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
-		return loginResponse{}, err
+	if err != nil {
+		return result, err
 	}
-	if result.Code != 0 {
-		return loginResponse{}, errors.New("login failed: " + result.Msg)
-	}
-	return result, nil
+	err = json.Unmarshal(raw, &result)
+	return result, err
 }
 
 func (c *wsClient) bizOK(opCode int32, payload map[string]interface{}) map[string]interface{} {

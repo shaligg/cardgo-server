@@ -2,13 +2,6 @@ package login
 
 import "context"
 
-type LoginRequest struct {
-	Account   string
-	Password  string
-	ClientIP  string
-	ClientVer string
-}
-
 type LoginResult struct {
 	UID         string `json:"uid"`
 	ServerID    string `json:"server_id"`
@@ -18,7 +11,7 @@ type LoginResult struct {
 }
 
 type Provider interface {
-	LoginAndIssueTicket(ctx context.Context, req LoginRequest) (LoginResult, error)
+	Enter(ctx context.Context, uid string, clientIP string) (LoginResult, error)
 }
 
 // LastServerRecorder 记录玩家最近一次被分配到的 GameServer。
@@ -37,10 +30,9 @@ type Service struct {
 	LastServer LastServerRecorder
 }
 
-// LoginAndIssueTicket 完成登录分配和 ticket 签发。
-func (s Service) LoginAndIssueTicket(ctx context.Context, req LoginRequest) (LoginResult, error) {
-	uid := req.Account
-	serverID, wsAddr, err := s.Allocator.Allocate(ctx, uid, req.ClientIP)
+// Enter 只为已经验证的 UID 分配节点并签发入场票。
+func (s Service) Enter(ctx context.Context, uid string, clientIP string) (LoginResult, error) {
+	serverID, wsAddr, err := s.Allocator.Allocate(ctx, uid, clientIP)
 	if err != nil {
 		return LoginResult{}, err
 	}

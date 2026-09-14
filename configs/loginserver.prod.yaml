@@ -14,3 +14,18 @@ redis:
   db: 0
   node_key_prefix: "game:gameserver"
   player_owner_key_prefix: "game:player_owner"
+
+account:
+  session_idle_ttl_sec: 2592000
+
+http_security:
+  trusted_proxies: []
+  requests_per_minute: 120
+  max_body_bytes: 4096
+
+db:
+  dsn_env_key: "ACCOUNT_DB_DSN"
+  max_open_conns: 20
+  max_idle_conns: 10
+  conn_max_lifetime_sec: 1800
+  conn_max_idle_time_sec: 300

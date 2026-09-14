@@ -1,12 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"time"
 
+	"github.com/bigfish/go_orm_1/internal/testutil/accountclient"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -79,27 +78,15 @@ func main() {
 }
 
 func login(account string) loginResp {
-	body := map[string]interface{}{
-		"account":    account,
-		"password":   "demo",
-		"client_ip":  "127.0.0.1",
-		"client_ver": "1.0.0",
-	}
-	raw, _ := json.Marshal(body)
-	resp, err := http.Post("http://127.0.0.1:8080/api/login", "application/json", bytes.NewReader(raw))
+	raw, err := accountclient.LoginAndEnter("", account)
 	if err != nil {
 		panic(err)
 	}
-	defer resp.Body.Close()
-
-	var lr loginResp
-	if err := json.NewDecoder(resp.Body).Decode(&lr); err != nil {
+	var result loginResp
+	if err := json.Unmarshal(raw, &result); err != nil {
 		panic(err)
 	}
-	if lr.Code != 0 {
-		panic(fmt.Sprintf("login failed: %s", lr.Msg))
-	}
-	return lr
+	return result
 }
 
 func send(conn *websocket.Conn, msg interface{}) {
