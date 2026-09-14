@@ -266,6 +266,7 @@ P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6
 25. DONE：GameServer 启动链路已删除 `repo.Migrate`，LoginServer 与 GameServer 均不执行 DDL；开发与隔离测试按需显式准备表，完整建表 SQL 留到首次上线前统一整理和审核。
 26. DONE：GameServer 配置加载与 LoginServer 统一为严格 YAML 和启动前校验；删除运行时默认值，补齐 staging/prod 显式鉴权配置，未知字段、关键字段缺失或参数关系无效时直接拒绝启动。
 27. DONE：删除未接入运行链路的 GameServer `auth.nonce_ttl_sec`；nonce 防重放记录统一按票据 `exp` 的剩余有效期保存，票据生命周期只由 LoginServer `ticket_ttl_sec` 控制。
+28. DONE：修正 EnterTicket 过期边界；`exp <= now` 时在消费 nonce 前拒绝验票，有效票据使用 `exp - now` 的正数剩余时长保存 nonce，避免零或负 TTL 产生重放窗口。
 
 ## 8. 卡牌 MVP 后续任务拆分
 

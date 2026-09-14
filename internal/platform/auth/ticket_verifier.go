@@ -67,13 +67,14 @@ func (v Verifier) Verify(ctx context.Context, token string, expectedServerID str
 	if json.Unmarshal(payload, &claims) != nil || claims.UID == "" || claims.ServerID == "" || claims.Nonce == "" || claims.Issuer != v.Issuer {
 		return nil, ErrInvalidToken
 	}
-	if claims.ExpUnix < nowUnix {
+	if claims.ExpUnix <= nowUnix {
 		return nil, ErrExpiredToken
 	}
 	if claims.ServerID != expectedServerID {
 		return nil, ErrInvalidToken
 	}
-	if err := v.ConsumeNonceOnce(ctx, claims.Nonce, time.Until(time.Unix(claims.ExpUnix, 0))); err != nil {
+	nonceTTL := time.Duration(claims.ExpUnix-nowUnix) * time.Second
+	if err := v.ConsumeNonceOnce(ctx, claims.Nonce, nonceTTL); err != nil {
 		return nil, err
 	}
 	return &claims, nil
