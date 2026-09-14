@@ -1439,8 +1439,7 @@ go_game_server/
 │   │   ├── db/
 │   │   ├── redis/
 │   │   ├── log/
-│   │   ├── metrics/
-│   │   └── health/
+│   │   └── metrics/
 │   ├── pkg/                       # 预留：项目内纯通用工具，有复用需求时再创建
 ├── scripts/
 │   └── loadtest/

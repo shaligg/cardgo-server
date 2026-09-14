@@ -599,7 +599,6 @@ internal/
     redis/
     log/
     metrics/
-    health/
 
   pkg/                 # 不预创建，确有两个以上模块复用纯工具时再加
 ```
