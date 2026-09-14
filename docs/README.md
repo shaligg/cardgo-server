@@ -17,6 +17,7 @@
 独立技术任务：
 
 - [独立 LoginServer 拆分](tasks/loginserver_split.md)：DONE，保留范围与验收记录；当前双进程启动、配置和运维命令见 [runbook](ops/runbook.md)。
+- [正式账号域建设](tasks/account_domain.md)：TODO，首次上线前完成账号身份、登录态、刷新令牌与入场票边界。
 
 维护规则：
 
