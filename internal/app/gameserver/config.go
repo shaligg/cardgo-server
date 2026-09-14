@@ -29,7 +29,6 @@ type Config struct {
 	Auth struct {
 		Issuer       string `yaml:"issuer"`
 		Algorithm    string `yaml:"algorithm"`
-		NonceTTLSec  int    `yaml:"nonce_ttl_sec"`
 		SecretEnvKey string `yaml:"secret_env_key"`
 	} `yaml:"auth"`
 	Admin struct {
@@ -128,8 +127,8 @@ func (cfg Config) validate() error {
 	if cfg.Auth.Algorithm != "hmac-sha256" {
 		return fmt.Errorf("unsupported auth.algorithm: %s", cfg.Auth.Algorithm)
 	}
-	if strings.TrimSpace(cfg.Auth.Issuer) == "" || strings.TrimSpace(cfg.Auth.SecretEnvKey) == "" || cfg.Auth.NonceTTLSec <= 0 {
-		return fmt.Errorf("invalid auth issuer, secret_env_key or nonce_ttl_sec")
+	if strings.TrimSpace(cfg.Auth.Issuer) == "" || strings.TrimSpace(cfg.Auth.SecretEnvKey) == "" {
+		return fmt.Errorf("auth.issuer and auth.secret_env_key are required")
 	}
 	if cfg.Admin.RequireAuth && strings.TrimSpace(cfg.Admin.TokenEnvKey) == "" {
 		return fmt.Errorf("admin.token_env_key is required when admin authentication is enabled")

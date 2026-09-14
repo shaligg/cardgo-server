@@ -1532,7 +1532,6 @@ server:
 auth:
   issuer: "login-module"
   algorithm: "hmac-sha256"
-  nonce_ttl_sec: 120
   secret_env_key: "GAME_TICKET_SECRET"
 
 admin:
@@ -1606,6 +1605,8 @@ redis:
 ```
 
 staging/prod 的 Redis 地址、对外 WS 地址、管理鉴权和 Origin 按部署环境配置。新增 GameServer 使用唯一的 node_id、WS/Admin 端口和 advertised_ws_addr，LoginServer 无需重启。LoginServer 没有 MySQL、游戏节点身份、节点心跳或玩法配置；签发 TTL 只属于 LoginServer。
+
+GameServer 的 nonce 防重放记录直接使用票据 `exp` 的剩余有效期，不设置第二套 nonce TTL；修改 LoginServer 的 `ticket_ttl_sec` 会同时决定票据和对应 nonce 记录的最长生命周期。
 
 ### 17.1 玩法配置边界
 MVP 阶段至少需要以下配置：
