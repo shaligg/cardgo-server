@@ -15,14 +15,18 @@ import (
 
 // accountProvider 是 HTTP 使用的账号能力，不让 Handler 访问数据库。
 type accountProvider interface {
-	Register(context.Context, string, string) (string, error)
-	Login(context.Context, string, string) (account.LoginResult, error)
+	Register(context.Context, account.Request) (string, error)
+	Login(context.Context, account.Request) (account.LoginResult, error)
 	Logout(context.Context, string) error
-	Authenticate(context.Context, string) (string, int64, error)
+	Authenticate(context.Context, string, string) (string, int64, error)
 }
 type credentialRequest struct {
 	Account  string `json:"account"`
 	Password string `json:"password"`
+	DeviceID string `json:"device_id"`
+}
+type deviceRequest struct {
+	DeviceID string `json:"device_id"`
 }
 type tokenResponse struct {
 	UID             string `json:"uid"`
@@ -41,6 +45,22 @@ type apiResponse struct {
 
 func tokenDTO(p account.LoginResult) tokenResponse {
 	return tokenResponse{p.UID, p.SessionToken, p.SessionExpireAt}
+}
+
+// requestToken 区分未提供与提供了无效 Authorization，后者不能降级为游客。
+func requestToken(r *http.Request, required bool) (string, error) {
+	values := r.Header.Values("Authorization")
+	if len(values) == 0 && !required {
+		return "", nil
+	}
+	if len(values) != 1 {
+		return "", account.ErrInvalid
+	}
+	auth := strings.Fields(values[0])
+	if len(auth) != 2 || !strings.EqualFold(auth[0], "Bearer") {
+		return "", account.ErrInvalid
+	}
+	return auth[1], nil
 }
 
 type accountHTTP struct {
@@ -148,31 +168,42 @@ func (h *accountHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err = decodeRequest(w, r, h.maxBody, &req); err != nil {
 			break
 		}
+		var token string
+		token, err = requestToken(r, false)
+		if err != nil {
+			break
+		}
+		input := account.Request{Account: req.Account, Password: req.Password, DeviceID: req.DeviceID, SessionToken: token}
 		if r.URL.Path == "/api/register" {
 			var uid string
-			uid, err = h.account.Register(ctx, req.Account, req.Password)
+			uid, err = h.account.Register(ctx, input)
 			data = map[string]string{"uid": uid}
 		} else {
 			var result account.LoginResult
-			result, err = h.account.Login(ctx, req.Account, req.Password)
+			result, err = h.account.Login(ctx, input)
 			data = tokenDTO(result)
 		}
 	case "/api/enter", "/api/logout":
-		if err = decodeRequest(w, r, h.maxBody, &struct{}{}); err != nil {
+		var req deviceRequest
+		var body interface{} = &req
+		if r.URL.Path == "/api/logout" {
+			body = &struct{}{}
+		}
+		if err = decodeRequest(w, r, h.maxBody, body); err != nil {
 			break
 		}
-		auth := strings.Fields(r.Header.Get("Authorization"))
-		if len(auth) != 2 || !strings.EqualFold(auth[0], "Bearer") {
-			err = account.ErrInvalid
+		var token string
+		token, err = requestToken(r, true)
+		if err != nil {
 			break
 		}
 		if r.URL.Path == "/api/logout" {
-			err = h.account.Logout(ctx, auth[1])
+			err = h.account.Logout(ctx, token)
 			data = struct{}{}
 		} else {
 			var uid string
 			var expiry int64
-			uid, expiry, err = h.account.Authenticate(ctx, auth[1])
+			uid, expiry, err = h.account.Authenticate(ctx, token, req.DeviceID)
 			if err == nil {
 				var entry login.LoginResult
 				entry, err = h.entry.Enter(ctx, uid, ip)

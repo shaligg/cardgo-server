@@ -10,19 +10,23 @@ import (
 	"testing"
 	"time"
 
+	idb "github.com/bigfish/go_orm_1/internal/infra/db"
 	"github.com/bigfish/go_orm_1/internal/platform/account"
 	"github.com/bigfish/go_orm_1/internal/platform/auth"
 	"github.com/bigfish/go_orm_1/internal/platform/login"
+	"github.com/bigfish/go_orm_1/internal/repo"
+	"github.com/bigfish/go_orm_1/internal/repo/model"
+	"github.com/bigfish/go_orm_1/internal/testutil/testdb"
 )
 
 type stubAccounts struct{ err error }
 
-func (s stubAccounts) Register(context.Context, string, string) (string, error) { return "u1", s.err }
-func (s stubAccounts) Login(context.Context, string, string) (account.LoginResult, error) {
+func (s stubAccounts) Register(context.Context, account.Request) (string, error) { return "u1", s.err }
+func (s stubAccounts) Login(context.Context, account.Request) (account.LoginResult, error) {
 	return account.LoginResult{UID: "u1", SessionToken: "session", SessionExpireAt: 2000000000}, s.err
 }
 func (s stubAccounts) Logout(context.Context, string) error { return s.err }
-func (s stubAccounts) Authenticate(_ context.Context, token string) (string, int64, error) {
+func (s stubAccounts) Authenticate(_ context.Context, token, _ string) (string, int64, error) {
 	if token != "session" {
 		return "", 0, account.ErrInvalid
 	}
@@ -137,4 +141,89 @@ func TestTrustedProxyChain(t *testing.T) {
 			t.Fatal(got, err)
 		}
 	}
+}
+
+// TestDeviceHTTPFlow 使用真实账号服务和 MySQL 验证协议优先级、绑定与进入。
+func TestDeviceHTTPFlow(t *testing.T) {
+	db := testdb.Open(t, &model.Account{}, &model.AccountIdentity{})
+	accounts, err := account.NewService(repo.NewDBAccountRepository(db), idb.NewTxManager(db), 30*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := &login.StaticNodeRegistry{Nodes: []login.NodeInfo{{ServerID: "node-a", WSAddr: "ws://localhost:8081/ws", Healthy: true, MaxOnline: 2000}}}
+	mux := buildHTTPMux(accounts, login.Service{Allocator: login.RegistryNodeAllocator{Registry: registry}, Issuer: login.LocalTicketIssuer{TTL: time.Minute, Secret: []byte("test-secret"), Issuer: "login-module"}}, httpTestConfig())
+	request := func(path, body string, authorization []string, want int) tokenResponse {
+		t.Helper()
+		r := httptest.NewRequest("POST", path, strings.NewReader(body))
+		for _, value := range authorization {
+			r.Header.Add("Authorization", value)
+		}
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("%s: got %d want %d: %s", path, w.Code, want, w.Body.String())
+		}
+		var response struct{ Data tokenResponse }
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Data
+	}
+	request("/api/login", `{"device_id":"android:http"}`, nil, 401)
+	registered := request("/api/register", `{"device_id":"android:http"}`, nil, 200)
+	if registered.UID == "" || registered.SessionToken != "" {
+		t.Fatal("registration missing UID or issued a session")
+	}
+	guest := request("/api/login", `{"device_id":"android:http"}`, nil, 200)
+	if guest.UID != registered.UID || guest.SessionToken == "" {
+		t.Fatal("guest missing identity or token")
+	}
+	for _, header := range [][]string{{"Bearer invalid"}, {""}, {"Basic abc"}, {"Bearer " + guest.SessionToken, "Bearer invalid"}} {
+		request("/api/login", `{"device_id":"android:http"}`, header, 401)
+		request("/api/register", `{"account":"http_user","password":"correct-password","device_id":"android:http"}`, header, 401)
+	}
+	request("/api/register", `{"device_id":"android:http"}`, []string{"Bearer " + guest.SessionToken}, 400)
+	request("/api/login", `{"account":"missing","password":"wrong-password","device_id":"android:http"}`, nil, 401)
+	request("/api/enter", `{"device_id":"android:http"}`, nil, 401)
+	resumed := request("/api/login", `{"account":"missing","password":"wrong-password","device_id":"ios:http"}`, []string{"Bearer " + guest.SessionToken}, 200)
+	if resumed.UID != guest.UID || resumed.SessionToken != guest.SessionToken {
+		t.Fatal("HTTP session priority changed identity/token")
+	}
+	bound := request("/api/register", `{"account":"http_user","password":"correct-password","device_id":"android:http"}`, []string{"Bearer " + guest.SessionToken}, 200)
+	if bound.UID != guest.UID {
+		t.Fatal("binding lost guest UID")
+	}
+	request("/api/login", `{"device_id":"android:http"}`, nil, 401)
+	request("/api/login", `{"device_id":"ios:http"}`, nil, 401)
+	fresh := request("/api/register", `{"device_id":"android:http"}`, nil, 200)
+	if fresh.UID == "" || fresh.UID == guest.UID || fresh.SessionToken != "" {
+		t.Fatal("new guest registration reused bound UID or issued session")
+	}
+	if again := request("/api/register", `{"device_id":"android:http"}`, nil, 200); again.UID != fresh.UID {
+		t.Fatal("repeated registration recreated unbound guest")
+	}
+	if logged := request("/api/login", `{"device_id":"android:http"}`, nil, 200); logged.UID != fresh.UID {
+		t.Fatal("device login did not use new guest")
+	}
+	request("/api/enter", `{}`, []string{"Bearer " + guest.SessionToken}, 200)
+	formal := request("/api/login", `{"account":"http_user","password":"correct-password","device_id":"android:http"}`, nil, 200)
+	if formal.UID != guest.UID {
+		t.Fatal("password did not recover bound guest")
+	}
+	entry := request("/api/enter", `{"device_id":"android:enter"}`, []string{"Bearer " + formal.SessionToken}, 200)
+	if entry.UID != guest.UID {
+		t.Fatal("enter UID changed")
+	}
+	var row model.Account
+	if err := db.Where("uid = ?", guest.UID).Take(&row).Error; err != nil || row.DeviceID != "android:enter" || row.GuestDeviceID != nil {
+		t.Fatal("enter did not persist formal device", err)
+	}
+	if again := request("/api/register", `{"device_id":"android:http"}`, nil, 200); again.UID != fresh.UID {
+		t.Fatal("formal login/enter replaced unbound guest")
+	}
+	if recovered := request("/api/login", `{"device_id":"android:http"}`, nil, 200); recovered.UID != fresh.UID {
+		t.Fatal("guest recovery lost after formal login")
+	}
+	request("/api/logout", `{}`, []string{"Bearer " + formal.SessionToken}, 200)
+	request("/api/login", `{"device_id":"android:enter"}`, nil, 401)
 }

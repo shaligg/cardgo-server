@@ -32,22 +32,65 @@ func NewService(repository *repo.DBAccountRepository, tx idb.TransactionRunner, 
 	return &Service{repository: repository, tx: tx, sessionIdleTTL: sessionIdleTTL, dummyHash: dummy, now: time.Now}, nil
 }
 
-// Register 显式创建账号与本地身份，重复注册回滚新 UID。
-func (s *Service) Register(ctx context.Context, name, password string) (string, error) {
-	name, err := credentials(name, password)
+// Request 不接受客户端 UID；设备只在没有更强凭证时用于恢复未绑定游客。
+type Request struct {
+	Account, Password, SessionToken, DeviceID string
+}
+
+// Register 统一创建正式/游客账号，或凭游客会话绑定身份并保留 UID 和会话。
+func (s *Service) Register(ctx context.Context, req Request) (string, error) {
+	if err := validateDeviceID(req.DeviceID); err != nil {
+		return "", err
+	}
+	if req.Account == "" && req.Password == "" && req.SessionToken == "" {
+		return s.registerDevice(ctx, req.DeviceID)
+	}
+	name, err := credentials(req.Account, req.Password)
 	if err != nil {
 		return "", err
 	}
-	hash, err := hashPassword(password)
+	var uid string
+	if req.SessionToken != "" {
+		uid, err = parseToken(req.SessionToken)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		uid = uuid.NewString()
+	}
+	hash, err := hashPassword(req.Password)
 	if err != nil {
 		return "", err
 	}
-	uid := uuid.NewString()
 	err = s.tx.Do(ctx, func(tx *gorm.DB) error {
-		if err := s.repository.CreateAccountInTx(ctx, tx, repo.Account{UID: uid, Status: "active"}); err != nil {
+		a := repo.Account{UID: uid, Status: "active", DeviceID: req.DeviceID}
+		if req.SessionToken != "" {
+			var err error
+			a, err = s.activeSessionInTx(ctx, tx, uid, req.SessionToken)
+			if err != nil {
+				return err
+			}
+			bound, err := s.repository.HasIdentityInTx(ctx, tx, uid)
+			if err != nil {
+				return err
+			}
+			if bound {
+				return ErrUnavailable
+			}
+		} else if err := s.repository.CreateAccountInTx(ctx, tx, a); err != nil {
 			return err
 		}
-		return s.repository.CreateIdentityInTx(ctx, tx, repo.AccountIdentity{Provider: "local", Subject: name, UID: uid, PasswordHash: hash})
+		if err := s.repository.CreateIdentityInTx(ctx, tx, repo.AccountIdentity{Provider: "local", Subject: name, UID: uid, PasswordHash: hash}); err != nil {
+			return err
+		}
+		if req.SessionToken == "" {
+			return nil
+		}
+		a.GuestDeviceID = nil
+		if req.DeviceID != "" {
+			a.DeviceID = req.DeviceID
+		}
+		return s.repository.SaveAccountInTx(ctx, tx, a)
 	})
 	if errors.Is(err, repo.ErrAccountIdentityExists) {
 		return "", ErrUnavailable

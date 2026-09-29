@@ -17,7 +17,7 @@
 独立技术任务：
 
 - [独立 LoginServer 拆分](tasks/loginserver_split.md)：DONE，保留范围与验收记录；当前双进程启动、配置和运维命令见 [runbook](ops/runbook.md)。
-- [正式账号域建设](tasks/account_domain.md)：自建账号阶段已完成，支持注册、登录、闲置续期与撤销；外部平台和绑定后续接入。
+- [正式账号域建设](tasks/account_domain.md)：统一注册建号、设备游客、绑定用户名密码保留会话、闲置续期与撤销；外部平台后续接入，验收见任务记录。
 
 维护规则：
 

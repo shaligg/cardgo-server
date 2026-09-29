@@ -14,11 +14,14 @@ import (
 var (
 	ErrAccountRecordNotFound = errors.New("account record not found")
 	ErrAccountIdentityExists = errors.New("account identity exists")
+	ErrGuestDeviceExists     = errors.New("guest device exists")
 )
 
 type Account struct {
 	UID, Status, TokenHash string
 	ExpiresAt              *time.Time
+	DeviceID               string
+	GuestDeviceID          *string
 	CreatedAt, UpdatedAt   time.Time
 }
 type AccountIdentity struct {
@@ -47,7 +50,12 @@ func (r *DBAccountRepository) Identity(ctx context.Context, provider, subject st
 // CreateAccountInTx 与身份写入共用业务事务，失败由调用者回滚。
 func (r *DBAccountRepository) CreateAccountInTx(ctx context.Context, tx *gorm.DB, a Account) error {
 	row := model.Account(a)
-	return tx.WithContext(ctx).Create(&row).Error
+	err := tx.WithContext(ctx).Create(&row).Error
+	var duplicate *mysql.MySQLError
+	if a.GuestDeviceID != nil && errors.As(err, &duplicate) && duplicate.Number == 1062 {
+		return ErrGuestDeviceExists
+	}
+	return err
 }
 func (r *DBAccountRepository) CreateIdentityInTx(ctx context.Context, tx *gorm.DB, i AccountIdentity) error {
 	row := model.AccountIdentity(i)
@@ -64,10 +72,29 @@ func (r *DBAccountRepository) AccountInTx(ctx context.Context, tx *gorm.DB, uid 
 	return Account(row), accountReadError(err)
 }
 
-// SaveSessionInTx 只更新已锁定账号的当前凭证，空值也必须写入以支持退出。
-func (r *DBAccountRepository) SaveSessionInTx(ctx context.Context, tx *gorm.DB, a Account) error {
+// HasIdentityInTx 必须是取得账号锁后的首次一致性读，避免旧快照及身份索引间隙锁。
+// 身份写入也须先锁定账号；新建账号和身份必须位于同一事务。
+func (r *DBAccountRepository) HasIdentityInTx(ctx context.Context, tx *gorm.DB, uid string) (bool, error) {
+	var row model.AccountIdentity
+	err := tx.WithContext(ctx).Where("uid = ?", uid).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// Guest 只按游客恢复键定位；普通设备记录不能用于认证。
+func (r *DBAccountRepository) Guest(ctx context.Context, deviceID string) (Account, error) {
+	var row model.Account
+	err := r.db.WithContext(ctx).Where("guest_device_id = ?", deviceID).Take(&row).Error
+	return Account(row), accountReadError(err)
+}
+
+// SaveAccountInTx 更新已锁定账号的凭证及设备字段；NULL/空值也必须写入以支持绑定与退出。
+func (r *DBAccountRepository) SaveAccountInTx(ctx context.Context, tx *gorm.DB, a Account) error {
 	return tx.WithContext(ctx).Model(&model.Account{}).Where("uid = ?", a.UID).Updates(map[string]interface{}{
 		"token_hash": a.TokenHash, "expires_at": a.ExpiresAt,
+		"device_id": a.DeviceID, "guest_device_id": a.GuestDeviceID,
 	}).Error
 }
 

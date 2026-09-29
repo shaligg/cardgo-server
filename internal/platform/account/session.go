@@ -49,20 +49,57 @@ func parseToken(token string) (string, error) {
 	return parts[1], nil
 }
 
-// Login 验证身份后原子切换唯一有效会话；写入失败保留旧会话。
-func (s *Service) Login(ctx context.Context, name, password string) (LoginResult, error) {
-	uid, err := s.verifyPassword(ctx, name, password)
+// Login 只认证已有账号；已提供凭证失败时绝不降级为设备登录。
+func (s *Service) Login(ctx context.Context, req Request) (LoginResult, error) {
+	if err := validateDeviceID(req.DeviceID); err != nil {
+		return LoginResult{}, err
+	}
+	if req.SessionToken != "" {
+		uid, expiry, err := s.Authenticate(ctx, req.SessionToken, req.DeviceID)
+		if err != nil {
+			return LoginResult{}, err
+		}
+		return LoginResult{UID: uid, SessionToken: req.SessionToken, SessionExpireAt: expiry}, nil
+	}
+	guest := req.Account == "" && req.Password == ""
+	var uid string
+	var err error
+	if guest {
+		if req.DeviceID == "" {
+			return LoginResult{}, ErrBadRequest
+		}
+		var a repo.Account
+		a, err = s.repository.Guest(ctx, req.DeviceID)
+		if errors.Is(err, repo.ErrAccountRecordNotFound) {
+			return LoginResult{}, ErrInvalid
+		}
+		uid = a.UID
+	} else {
+		uid, err = s.verifyPassword(ctx, req.Account, req.Password)
+	}
 	if err != nil {
 		return LoginResult{}, err
 	}
 	var result LoginResult
 	err = s.tx.Do(ctx, func(tx *gorm.DB) error {
-		a, err := s.accountInTx(ctx, tx, uid)
+		var a repo.Account
+		var err error
+		if guest {
+			a, err = s.guestAccountInTx(ctx, tx, uid, req.DeviceID)
+			if errors.Is(err, errGuestDeviceChanged) {
+				return ErrInvalid
+			}
+		} else {
+			a, err = s.accountInTx(ctx, tx, uid)
+		}
 		if err != nil {
 			return err
 		}
 		if a.Status != "active" {
 			return ErrInvalid
+		}
+		if req.DeviceID != "" {
+			a.DeviceID = req.DeviceID
 		}
 		token, err := newToken(uid)
 		if err != nil {
@@ -70,7 +107,7 @@ func (s *Service) Login(ctx context.Context, name, password string) (LoginResult
 		}
 		expiry := s.now().UTC().Add(s.sessionIdleTTL)
 		a.TokenHash, a.ExpiresAt = tokenHash(token), &expiry
-		if err := s.repository.SaveSessionInTx(ctx, tx, a); err != nil {
+		if err := s.repository.SaveAccountInTx(ctx, tx, a); err != nil {
 			return err
 		}
 		result = LoginResult{UID: uid, SessionToken: token, SessionExpireAt: expiry.Unix()}
@@ -94,30 +131,44 @@ func (s *Service) sessionInTx(ctx context.Context, tx *gorm.DB, uid, token strin
 	return a, nil
 }
 
-// Authenticate 在同一事务中验证并延长闲置期限；令牌不轮换，丢失响应可安全重试。
-func (s *Service) Authenticate(ctx context.Context, token string) (string, int64, error) {
+// activeSessionInTx 取得账号锁后再检查状态和时限，供绑定与续期共同使用。
+func (s *Service) activeSessionInTx(ctx context.Context, tx *gorm.DB, uid, token string) (repo.Account, error) {
+	a, err := s.sessionInTx(ctx, tx, uid, token)
+	if err != nil {
+		return a, err
+	}
+	if a.Status != "active" || a.ExpiresAt == nil {
+		return a, ErrInvalid
+	}
+	if !s.now().UTC().Before(*a.ExpiresAt) {
+		return a, ErrExpired
+	}
+	return a, nil
+}
+
+// Authenticate 在同一事务中验证、记录设备并续期；令牌不轮换。
+func (s *Service) Authenticate(ctx context.Context, token, deviceID string) (string, int64, error) {
+	if err := validateDeviceID(deviceID); err != nil {
+		return "", 0, err
+	}
 	uid, err := parseToken(token)
 	if err != nil {
 		return "", 0, err
 	}
 	var expiresAt int64
 	err = s.tx.Do(ctx, func(tx *gorm.DB) error {
-		a, err := s.sessionInTx(ctx, tx, uid, token)
+		a, err := s.activeSessionInTx(ctx, tx, uid, token)
 		if err != nil {
 			return err
 		}
-		if a.Status != "active" || a.ExpiresAt == nil {
-			return ErrInvalid
+		if deviceID != "" {
+			a.DeviceID = deviceID
 		}
-		// 等待行锁后再取时钟，避免排队期间过期的凭证被续期。
 		now := s.now().UTC()
-		if !now.Before(*a.ExpiresAt) {
-			return ErrExpired
-		}
 		if deadline := now.Add(s.sessionIdleTTL); deadline.After(*a.ExpiresAt) {
 			a.ExpiresAt = &deadline
 		}
-		if err := s.repository.SaveSessionInTx(ctx, tx, a); err != nil {
+		if err := s.repository.SaveAccountInTx(ctx, tx, a); err != nil {
 			return err
 		}
 		expiresAt = a.ExpiresAt.Unix()
@@ -144,6 +195,6 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 			return err
 		}
 		a.TokenHash, a.ExpiresAt = "", nil
-		return s.repository.SaveSessionInTx(ctx, tx, a)
+		return s.repository.SaveAccountInTx(ctx, tx, a)
 	})
 }

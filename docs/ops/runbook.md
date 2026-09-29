@@ -64,11 +64,12 @@ LOGIN_SPLIT_TEST_DB_DSN='game_test:password@tcp(127.0.0.1:3306)/game_test?charse
 
 ### 2.2 账号接入与维护
 
+- 部署前显式准备 `accounts`、`account_identities` 两张表，新建账号表使用 [account_schema.sql](../../scripts/sql/account_schema.sql)，已有表按实际结构独立迁移。SQL 已包含 device_id、可空的 guest_device_id 及唯一索引，业务启动只探测、不自动迁移。统一 register 建号，login 只认证已有账号；设备只可恢复未绑定游客。游客绑定用户名密码沿用注册接口并携有效 session，保留 UID 和原会话。请求优先级和完整约束见技术架构。
 - API、字段、令牌期限、续期规则和错误码以[技术架构 6.0/19.1](../../backend_technical_architecture.md)为准；客户端在本机保存 session_token，进入时自动续期，连续闲置 30 天或被新密码登录替换后重新认证；网络故障保留令牌重试，收到 kick 则停止自动重连。
 - 正式入口使用 HTTPS/WSS；可信代理 CIDR 按真实部署填写，不信任客户端提供的来源 IP。账号 API 有请求体上限、来源限流和 no-store 响应。
 - `LOGIN_URL` 可为本地 smoke 指定登录地址；`ACCOUNT_TEST_PASSWORD` 可覆盖测试密码。仅在隔离开发/测试环境运行，测试名称映射为固定账号名，重复运行复用该账号；不得在日志中打印完整凭证。
 - 账号数据库连接应只具备账号表的数据权限；建表权限交给显式部署步骤。GameServer 无需账号表权限。
-- 账号表仅保留当前凭证，无历史会话清理任务；账号仅接受最近一次密码登录的会话，旧 Token 需重新认证；退出校验当前凭证后清空，封禁阻止新登录/续期/换票。已签票等待原 TTL 到期，在线 WS 的即时踢人不属于本任务。
+- 账号表仅保留当前凭证，无历史会话清理任务；密码/设备登录替换会话，session 认证复用原令牌。游客绑定不修改会话；设备登录只通过 guest_device_id 恢复游客，并校验身份与状态；绑定释放恢复键，普通 device_id 仅记录设备。封禁阻止新登录/续期/换票。已签票等待原 TTL 到期，在线 WS 的即时踢人不属于本任务。
 
 ## 3. P5 Load Test (k6)
 

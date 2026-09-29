@@ -290,7 +290,7 @@ DB 持久化数据
 
 登录分配由独立 LoginServer 内的 `Login / NodeAllocator` 决定。
 
-自建账号域已落地：先注册/登录取得账号登录态，再凭有效会话申请入场票。内部 UID 由服务端生成，退出、闲置续期和账号状态由 LoginServer 统一校验。外部平台及身份绑定后续接入。
+账号域支持自建账号及设备游客：统一 register 建号，login 认证已有账号，再凭有效会话申请入场票。游客绑定用户名密码保留原 UID 和 session；设备认证通过游客恢复字段定位账号并检查身份与状态，已有正式身份就拒绝。正式身份验证失败不能降级为游客。内部 UID、退出、闲置续期和账号状态由 LoginServer 统一维护，外部平台认证后续接入。
 
 GameServer 仅验证短期入场票；断线使用已有登录态重新进入，会话闲置 30 天过期后重新验证身份。最终协议、数据与配置见 `backend_technical_architecture.md`，执行和验收记录见 `docs/tasks/account_domain.md`。
 

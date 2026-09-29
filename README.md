@@ -8,7 +8,7 @@ Cardgo Server is a game server demo that implements a complete client-to-databas
 
 ### Core Features
 
-- **Independent LoginServer** — Password accounts, revocable sessions, Redis node allocation and signed entry tickets; clients connect directly to the assigned GameServer
+- **Independent LoginServer** — Password accounts, device guests with password binding, revocable sessions, Redis node allocation and signed entry tickets; clients connect directly to the assigned GameServer
 - **WebSocket Gateway** — connection upgrade, HMAC ticket authentication, nonce-based replay protection, heartbeat, rate limiting, graceful shutdown
 - **Shard Dispatcher** — per-player serial execution via 64-way sharded locks; ensures data consistency without blocking different players
 - **6 Business Modules** — Player, Asset, Inventory under `domain`; Card, Battle, Workshop under `gameplay`
@@ -106,7 +106,7 @@ LOGIN_SPLIT_TEST_DB_DSN='game_test:password@tcp(127.0.0.1:3306)/game_test?charse
 
 Edit `configs/gameserver.{local,staging,prod}.yaml` and `configs/loginserver.{local,staging,prod}.yaml`. Each process accepts `GAME_CONFIG`, defaulting to its own local file. Both must use the same ticket issuer, algorithm, secret and Redis instance/DB/key prefixes. Each process reads its own `db.dsn_env_key`: `GAME_DB_DSN` for game data and `ACCOUNT_DB_DSN` for account data.
 
-For another GameServer, use a unique `server.node_id`, WS/Admin ports and `server.advertised_ws_addr`. LoginServer discovers it through Redis without restarting. See [the runbook](docs/ops/runbook.md) for startup, drain, monitoring and acceptance commands. Self-hosted password accounts are implemented. External platforms and identity binding are deferred. Protocols, 30-day idle session expiry and revocation rules are defined only in [technical architecture §19.1](backend_technical_architecture.md#191-account--enter-api独立-loginserver).
+For another GameServer, use a unique `server.node_id`, WS/Admin ports and `server.advertised_ws_addr`. LoginServer discovers it through Redis without restarting. See [the runbook](docs/ops/runbook.md) for startup, drain, monitoring and acceptance commands. Password and device guest accounts are created through register; login only authenticates existing accounts. Guests can bind a username/password while keeping their UID and session. External platforms are deferred. Protocols, 30-day idle session expiry and revocation rules are defined only in [technical architecture §19.1](backend_technical_architecture.md#191-account--enter-api独立-loginserver).
 
 ## Architecture
 

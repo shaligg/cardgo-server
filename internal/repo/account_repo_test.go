@@ -49,7 +49,7 @@ func TestAccountPersistenceAndConflictRollback(t *testing.T) {
 				return err
 			}
 			a.TokenHash, a.ExpiresAt = want.TokenHash, want.ExpiresAt
-			return r.SaveSessionInTx(ctx, tx, a)
+			return r.SaveAccountInTx(ctx, tx, a)
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -69,11 +69,16 @@ func TestAccountPersistenceAndConflictRollback(t *testing.T) {
 			t.Fatal("current expiry not persisted")
 		}
 	}
-	// 启动探测也应拒绝缺少新字段的旧表结构。
-	if err := db.Migrator().DropColumn(&model.Account{}, "token_hash"); err != nil {
-		t.Fatal(err)
-	}
-	if err := r.CheckSchema(ctx); err == nil {
-		t.Fatal("schema check accepted missing token hash column")
+	// 启动探测拒绝缺少任一新字段的旧两表结构。
+	for _, column := range []string{"device_id", "guest_device_id", "token_hash"} {
+		if err := db.Migrator().DropColumn(&model.Account{}, column); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.CheckSchema(ctx); err == nil {
+			t.Fatal("schema check accepted missing column", column)
+		}
+		if err := db.AutoMigrate(&model.Account{}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

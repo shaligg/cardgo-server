@@ -619,13 +619,17 @@ func TestAccountFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	post := func(path string, token string, want int) []byte {
+	postBody := func(path string, token string, body interface{}, want int) []byte {
 		t.Helper()
-		status, raw, err := accountclient.Post("", path, struct{}{}, token)
+		status, raw, err := accountclient.Post("", path, body, token)
 		if err != nil || status != want {
 			t.Fatalf("%s status=%d want=%d err=%v", path, status, want, err)
 		}
 		return raw
+	}
+	post := func(path string, token string, want int) []byte {
+		t.Helper()
+		return postBody(path, token, struct{}{}, want)
 	}
 	enter := func() login.LoginResult {
 		t.Helper()
@@ -709,4 +713,67 @@ func TestAccountFlow(t *testing.T) {
 	}
 	post("/api/enter", recovered.SessionToken, 401)
 	t.Log("real idle renewal, same-token retry/reconnect after restart, device replacement/kick, expiry recovery, logout, ban and existing-WS boundary passed")
+
+	// 复用当前真实进程，验证游客建角色后绑定密码仍进入原角色。
+	deviceID := "android:" + uuid.NewString()
+	deviceBody := map[string]string{"device_id": deviceID}
+	loginWithBody := func(body interface{}) accountclient.Session {
+		t.Helper()
+		var response struct{ Data accountclient.Session }
+		if err := json.Unmarshal(postBody("/api/login", "", body, 200), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Data
+	}
+	postBody("/api/login", "", deviceBody, 401)
+	postBody("/api/register", "", deviceBody, 200)
+	p = loginWithBody(deviceBody)
+	guestUID, guestToken := p.UID, p.SessionToken
+	entry = enter()
+	guestConn := c.auth(entry.WSAddr, entry.EnterTicket, "")
+	if got := c.exchange(guestConn, map[string]interface{}{"seq": 2, "type": "biz_req", "op_code": 1001, "payload": map[string]interface{}{}}); got.Type != "biz_ack" || !got.Payload.OK {
+		t.Fatal("guest player not initialized")
+	}
+	credentials := map[string]string{"account": "guest_" + uuid.NewString(), "password": "correct-password", "device_id": deviceID}
+	postBody("/api/register", guestToken, credentials, 200)
+	postBody("/api/login", "", deviceBody, 401)
+	if got := c.exchange(guestConn, map[string]interface{}{"seq": 3, "type": "biz_req", "op_code": 1001, "payload": map[string]interface{}{}}); got.Type != "biz_ack" || !got.Payload.OK {
+		t.Fatal("binding interrupted active player")
+	}
+	_ = guestConn.Close()
+	// 原 session 继续申请入场票并重连，不再次密码登录。
+	entry = enter()
+	_ = c.auth(entry.WSAddr, entry.EnterTicket, "").Close()
+	var playerCount int64
+	if err := db.Model(&model.Player{}).Where("uid = ?", guestUID).Count(&playerCount).Error; err != nil || playerCount != 1 {
+		t.Fatal("binding duplicated player", playerCount, err)
+	}
+	// 同设备重新游客试玩得到新 UID；继续注册不能反复创建未绑定游客。
+	postBody("/api/register", "", deviceBody, 200)
+	p = loginWithBody(deviceBody)
+	if p.UID == guestUID {
+		t.Fatal("new guest recovered bound account")
+	}
+	var repeated struct{ Data accountclient.Session }
+	if err := json.Unmarshal(postBody("/api/register", "", deviceBody, 200), &repeated); err != nil || repeated.Data.UID != p.UID {
+		t.Fatal("repeated guest registration changed UID", err)
+	}
+	entry = enter()
+	_ = c.auth(entry.WSAddr, entry.EnterTicket, "").Close()
+	freshUID := p.UID
+	p = loginWithBody(credentials)
+	if p.UID != guestUID {
+		t.Fatal("original password account lost")
+	}
+	postBody("/api/enter", p.SessionToken, deviceBody, 200)
+	if err := json.Unmarshal(postBody("/api/register", "", deviceBody, 200), &repeated); err != nil || repeated.Data.UID != freshUID {
+		t.Fatal("switching to formal account replaced unbound guest", err)
+	}
+	p = loginWithBody(deviceBody)
+	if p.UID != freshUID {
+		t.Fatal("guest recovery after account switch changed UID")
+	}
+	entry = enter()
+	_ = c.auth(entry.WSAddr, entry.EnterTicket, "").Close()
+	t.Log("guest register/login -> bind -> retained session/WS -> new guest -> formal login/enter -> same guest recovered")
 }

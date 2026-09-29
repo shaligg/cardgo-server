@@ -4,12 +4,14 @@ import "time"
 
 // Account 保存内部 UID、账号状态及当前登录凭证，不承担登录历史。
 type Account struct {
-	UID       string `gorm:"primaryKey;size:64"`
-	Status    string `gorm:"size:16;not null"`
-	TokenHash string `gorm:"type:char(64);not null"`
-	ExpiresAt *time.Time
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	UID           string `gorm:"primaryKey;size:64"`
+	Status        string `gorm:"size:16;not null"`
+	TokenHash     string `gorm:"type:char(64);not null"`
+	ExpiresAt     *time.Time
+	DeviceID      string  `gorm:"type:varbinary(128);not null"`
+	GuestDeviceID *string `gorm:"type:varbinary(128);uniqueIndex"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // AccountIdentity 以来源和规范化身份唯一映射内部 UID。
